@@ -1611,6 +1611,7 @@ describe('normalizeSourcePath', () => {
     ['webpack triple slash', () => 'webpack:///./src/components/Button.tsx'],
     ['next webpack-internal', () => 'webpack-internal:///(app-pages-browser)/./src/components/Button.tsx'],
     ['turbopack project', () => '[project]/src/components/Button.tsx'],
+    ['turbopack source map url', () => 'turbopack:///[project]/src/components/Button.tsx'],
     ['vite /@fs', () => `/@fs${join(root, 'src/components/Button.tsx')}`],
     ['vite root-relative url path', () => '/src/components/Button.tsx?t=1712345'],
     ['file url', () => `file://${join(root, 'src/components/Button.tsx')}`],
@@ -1680,6 +1681,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PREFIXES: RegExp[] = [
+  /^turbopack:\/\/\/(\[project\]\/)?/,
   /^webpack-internal:\/\/\/(\([^)]*\)\/)?/,
   /^webpack:\/\/\/?(?:[^/]*\/)?/,
   /^\[project\]\//,
