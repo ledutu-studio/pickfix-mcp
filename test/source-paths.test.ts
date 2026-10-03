@@ -1,15 +1,22 @@
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { normalizeSourcePath } from '../src/source-paths.js';
 import { tempDir } from './helpers.js';
 
 let root = '';
+let outside = '';
 beforeAll(() => {
   root = realpathSync(tempDir());
+  outside = realpathSync(tempDir());
   mkdirSync(join(root, 'src/components'), { recursive: true });
   writeFileSync(join(root, 'src/components/Button.tsx'), '');
   writeFileSync(join(root, 'src/App.vue'), '');
+  // Create a symlink inside root pointing to a file outside root
+  writeFileSync(join(outside, 'secret.tsx'), '');
+  symlinkSync(join(outside, 'secret.tsx'), join(root, 'src/link.tsx'));
+  // Create a sibling directory with a file
+  writeFileSync(join(outside, 'file.ts'), '');
 });
 
 describe('normalizeSourcePath', () => {
@@ -43,5 +50,18 @@ describe('normalizeSourcePath', () => {
 
   it('reports a missing file as not found with the cleaned path', () => {
     expect(normalizeSourcePath('webpack:///./src/Missing.tsx', root)).toEqual({ path: 'src/Missing.tsx', found: false });
+  });
+
+  it('rejects symlinks that point outside the repository', () => {
+    expect(normalizeSourcePath('src/link.tsx', root)).toEqual({ path: 'src/link.tsx', found: false });
+  });
+
+  it('rejects relative paths that escape via ../', () => {
+    const sibling = join(root, '..', 'sibling');
+    expect(normalizeSourcePath(`../${sibling}/file.ts`, root)).toEqual({ path: `../${sibling}/file.ts`, found: false });
+  });
+
+  it('resolves webpack:/// with triple slash (empty namespace)', () => {
+    expect(normalizeSourcePath('webpack:///src/components/Button.tsx', root)).toEqual({ path: 'src/components/Button.tsx', found: true });
   });
 });

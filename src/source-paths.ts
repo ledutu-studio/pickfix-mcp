@@ -1,11 +1,11 @@
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PREFIXES: RegExp[] = [
   /^turbopack:\/\/\/(\[project\]\/)?/,
   /^webpack-internal:\/\/\/(\([^)]*\)\/)?/,
-  /^webpack:\/\/\/?(?:[^/]*\/)?/,
+  /^webpack:\/\/(?:\/|[^/]+\/)/,
   /^\[project\]\//,
   /^\/@fs(?=\/)/,
 ];
@@ -35,6 +35,7 @@ function inside(root: string, candidate: string): string | null {
 /**
  * Maps a page-reported source path to a path inside the repository. Only paths inside
  * `repoRoot` are ever checked on disk; anything else is reported as not found.
+ * `repoRoot` must already be realpath'd (resolveRepoRoot does this).
  */
 export function normalizeSourcePath(raw: string, repoRoot: string): { path: string; found: boolean } {
   const cleaned = clean(raw);
@@ -43,7 +44,15 @@ export function normalizeSourcePath(raw: string, repoRoot: string): { path: stri
     : [resolve(repoRoot, cleaned)];
   for (const candidate of candidates) {
     const rel = inside(repoRoot, candidate);
-    if (rel && existsSync(candidate)) return { path: rel, found: true };
+    if (rel && existsSync(candidate)) {
+      try {
+        const real = realpathSync(candidate);
+        const realRel = inside(repoRoot, real);
+        if (realRel) return { path: realRel, found: true };
+      } catch {
+        // Treat realpath failure as not found
+      }
+    }
   }
   const shown = isAbsolute(cleaned) ? (inside(repoRoot, cleaned) ?? cleaned) : cleaned.replace(/^\.\//, '');
   return { path: shown, found: false };
