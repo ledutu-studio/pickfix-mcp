@@ -1,0 +1,12 @@
+{
+  "name": "pickfix",
+  "owner": { "name": "ledutu" },
+  "description": "PickFix: send UI feedback from the browser straight to your coding agent.",
+  "plugins": [
+    {
+      "name": "pickfix",
+      "source": "./plugin",
+      "description": "Receive UI feedback from the PickFix browser extension and fix it in this session."
+    }
+  ]
+}

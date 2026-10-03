@@ -1,0 +1,12 @@
+{
+  "name": "pickfix",
+  "displayName": "PickFix",
+  "version": "0.1.0",
+  "description": "Receive UI feedback from the PickFix browser extension (picked elements, text edits, recorded workflows, screenshots) and fix it in this session.",
+  "author": { "name": "ledutu" },
+  "keywords": ["feedback", "frontend", "ui", "browser-extension", "mcp"],
+  "mcpServers": {
+    "pickfix": { "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/server.mjs"] }
+  },
+  "channels": [{ "server": "pickfix", "displayName": "PickFix" }]
+}
