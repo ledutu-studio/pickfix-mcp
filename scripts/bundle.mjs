@@ -6,7 +6,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 /** @type {import('esbuild').BuildOptions} */
 export const options = {
   absWorkingDir: root,
-  entryPoints: { server: 'src/server.ts' },
+  entryPoints: { server: 'src/server.ts', hook: 'src/hook.ts' },
   bundle: true,
   platform: 'node',
   format: 'esm',
