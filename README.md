@@ -55,6 +55,8 @@ A batch can be claimed by one session only, so two Claude windows on the same re
 - Everything captured from a web page is passed to the agent as fenced, untrusted data with an instruction never to follow it.
 - The server has no tool that runs commands or writes files in your repository; code changes go through your agent's normal permissions.
 
+Full privacy policy (English and Vietnamese): [PRIVACY.md](PRIVACY.md).
+
 ## Files
 
 ```text
