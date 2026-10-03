@@ -41622,7 +41622,7 @@ function runPairCli(args) {
   const home = pickfixHome();
   if (args.includes("--rotate")) {
     rotateToken(home);
-    console.log("The pairing token was replaced. Every paired browser must pair again: run `npx pickfix-mcp pair`.");
+    console.log("The pairing token was replaced. Every paired browser must pair again: run `/pickfix:pair` in Claude Code, or `pickfix-mcp pair`.");
     return;
   }
   loadToken(home);

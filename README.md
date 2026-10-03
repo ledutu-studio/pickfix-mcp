@@ -25,14 +25,14 @@ Without the flag everything still works: run `/pickfix:fix` when the extension s
 
 ## Pair the extension (once per machine)
 
-1. In Claude Code, run `/pickfix:pair` (or `npx pickfix-mcp pair` in a terminal).
+1. In Claude Code, run `/pickfix:pair`.
 2. Open the PickFix panel in Chrome and type the 6-digit code within 2 minutes.
 
-Every session on the machine shares the pairing. To revoke it: `npx pickfix-mcp pair --rotate`, then pair again.
+Every session on the machine shares the pairing. To revoke it, delete `~/.pickfix/token` and pair again; the next `pickfix-mcp` start creates a new token.
 
 ## Other agents (Cursor, Codex, …)
 
-Add an MCP server that runs `npx -y pickfix-mcp`. These clients have no channel push: ask the agent to use the `fix` prompt, or to call `pickfix_list_batches` and follow the tool descriptions.
+`pickfix-mcp` is not on npm yet. Clone this repository and add a stdio MCP server that runs `node <clone>/plugin/dist/server.mjs` (the bundle needs no install). To pair from a terminal, run `node <clone>/plugin/dist/server.mjs pair`. These clients have no channel push: ask the agent to use the `fix` prompt, or to call `pickfix_list_batches` and follow the tool descriptions.
 
 ## What the agent gets
 
