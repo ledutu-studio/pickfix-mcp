@@ -2,6 +2,7 @@
   "name": "pickfix-mcp",
   "version": "0.1.0",
   "description": "Local MCP server that receives UI feedback from the PickFix browser extension and hands it to your coding agent.",
+  "keywords": ["mcp", "claude-code", "frontend", "feedback", "browser-extension"],
   "type": "module",
   "bin": { "pickfix-mcp": "plugin/dist/server.mjs" },
   "files": ["plugin/dist", "README.md"],
