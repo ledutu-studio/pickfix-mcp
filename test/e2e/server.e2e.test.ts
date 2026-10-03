@@ -5,16 +5,33 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { afterEach, describe, expect, it } from 'vitest';
 import { makeBatch } from '../../packages/protocol/test/fixtures.js';
 import { tempDir, tempHome } from '../helpers.js';
-import { connect, rejectedStatus } from '../ws-client.js';
+import { connect as rawConnect, rejectedStatus, type TestClient } from '../ws-client.js';
 
 const SERVER = resolve('plugin/dist/server.mjs');
 const DEV_ID = 'e2etestextensionid';
 const ORIGIN = `chrome-extension://${DEV_ID}`;
 
-type Agent = { client: Client; notifications: { method: string; params?: Record<string, unknown> }[]; port: number; close(): Promise<void> };
+type Agent = { pid: number | null; client: Client; notifications: { method: string; params?: Record<string, unknown> }[]; port: number; close(): Promise<void> };
 const running: Agent[] = [];
+const sockets: TestClient[] = [];
+
+async function connect(port: number, options: Parameters<typeof rawConnect>[1] = {}) {
+  const socket = await rawConnect(port, options);
+  sockets.push(socket);
+  return socket;
+}
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 afterEach(async () => {
+  for (const socket of sockets.splice(0)) socket.ws.terminate();
   for (const agent of running.splice(0)) await agent.close().catch(() => {});
 });
 
@@ -27,19 +44,21 @@ async function startAgent(home: string, repo: string): Promise<Agent> {
     args: [SERVER],
     cwd: repo,
     env: { ...(process.env as Record<string, string>), PICKFIX_HOME: home, PICKFIX_EXTENSION_IDS: DEV_ID },
-    stderr: 'pipe',
+    stderr: 'ignore',
   });
   const client = new Client({ name: 'e2e-agent', version: '1.0.0' });
   const notifications: Agent['notifications'] = [];
   client.fallbackNotificationHandler = async (n) => {
     notifications.push(n as Agent['notifications'][number]);
   };
+  const agent: Agent = { pid: null, client, notifications, port: 0, close: () => client.close() };
+  running.push(agent);
   await client.connect(transport);
+  agent.pid = transport.pid;
   const status = textOf(await client.callTool({ name: 'pickfix_status', arguments: {} }));
   const port = Number(/ws:\/\/127\.0\.0\.1:(\d+)\/pickfix/.exec(status)?.[1]);
   expect(port).toBeGreaterThan(0);
-  const agent = { client, notifications, port, close: () => client.close() };
-  running.push(agent);
+  agent.port = port;
   return agent;
 }
 
@@ -124,10 +143,14 @@ describe('pickfix-mcp end to end', () => {
     const ext = await pairedExtension(first);
     ext.send({ v: 1, type: 'batch.submit', requestId: 'r1', batch: makeBatch() });
     await ext.next();
-    await first.client.callTool({ name: 'pickfix_claim_batch', arguments: {} });
+    const claimed = await first.client.callTool({ name: 'pickfix_claim_batch', arguments: {} });
+    expect(textOf(claimed)).toContain('# PickFix batch batch-1');
+    expect(await ext.next()).toMatchObject({ type: 'batch.status', batchId: 'batch-1', status: 'working' });
+    const pid = first.pid;
+    expect(pid).toBeGreaterThan(0);
     await first.close();
     running.splice(running.indexOf(first), 1);
-    await new Promise((r) => setTimeout(r, 300));
+    await until(() => (alive(pid!) ? undefined : true), 5000);
 
     const next = await startAgent(home, repo);
     expect(textOf(await next.client.callTool({ name: 'pickfix_list_batches', arguments: {} }))).toContain('batch-1 · queued');
