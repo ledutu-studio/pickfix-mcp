@@ -47,6 +47,28 @@ function originOf(url: string): string {
   }
 }
 
+export type ClaimOwner = { sessionId: string; pid: number; at: string; kind: 'claim' | 'cancel' };
+
+export type ClaimResult =
+  | { ok: true; record: BatchRecord }
+  | { ok: false; reason: 'none-queued' | 'not-found' | 'already-claimed' | 'cancelled' | 'finished' };
+export type ReportResult =
+  | { ok: true; state: BatchState }
+  | { ok: false; reason: 'not-found' | 'not-claimed' | 'claimed-by-other' | 'already-reported' };
+export type CancelResult = { ok: true; state: BatchState } | { ok: false; reason: 'not-found' | 'conflict' };
+
+const FINISHED: readonly BatchStatus[] = ['done', 'partial', 'failed', 'cancelled'];
+const WEEK_MS = 7 * 24 * 3600 * 1000;
+
+export function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
 export class QueueStore {
   readonly dir: string;
   protected readonly now: () => Date;
@@ -213,5 +235,103 @@ export class QueueStore {
   screenshotBase64(batchId: string, item: StoredItem): string | undefined {
     const path = this.screenshotPath(batchId, item);
     return path ? readFileSync(path).toString('base64') : undefined;
+  }
+
+  protected claimDir(batchId: string): string {
+    return join(this.batchDir(batchId), 'claim');
+  }
+
+  /** mkdir is atomic: whoever creates claim/ owns the batch, for a claim or a cancel. */
+  protected takeClaim(batchId: string, owner: ClaimOwner): boolean {
+    try {
+      mkdirSync(this.claimDir(batchId));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw error;
+    }
+    writeJson(join(this.claimDir(batchId), 'owner.json'), owner);
+    return true;
+  }
+
+  protected transition(batchId: string, state: BatchState, status: BatchStatus, sessionId: string, extra: Partial<BatchState> = {}): BatchState {
+    const at = this.now().toISOString();
+    const next: BatchState = { ...state, ...extra, status, updatedAt: at, history: [...state.history, { status, at, sessionId }] };
+    if (!('note' in extra)) delete next.note;
+    this.writeState(batchId, next);
+    return next;
+  }
+
+  owner(batchId: string): ClaimOwner | undefined {
+    if (!ID_PATTERN.test(batchId)) return undefined;
+    return readJson<ClaimOwner>(join(this.dir, batchId, 'claim', 'owner.json'), this.log);
+  }
+
+  claim(sessionId: string, pid: number, batchId?: string): ClaimResult {
+    if (batchId !== undefined) return this.claimOne(sessionId, pid, batchId);
+    for (const summary of this.list(['queued'])) {
+      const result = this.claimOne(sessionId, pid, summary.id);
+      if (result.ok) return result;
+    }
+    return { ok: false, reason: 'none-queued' };
+  }
+
+  protected claimOne(sessionId: string, pid: number, batchId: string): ClaimResult {
+    const record = this.get(batchId);
+    if (!record) return { ok: false, reason: 'not-found' };
+    if (record.state.status === 'cancelled') return { ok: false, reason: 'cancelled' };
+    if (FINISHED.includes(record.state.status)) return { ok: false, reason: 'finished' };
+    if (!this.takeClaim(batchId, { sessionId, pid, at: this.now().toISOString(), kind: 'claim' })) {
+      return { ok: false, reason: this.readState(batchId)?.status === 'cancelled' ? 'cancelled' : 'already-claimed' };
+    }
+    const state = this.transition(batchId, record.state, 'working', sessionId);
+    return { ok: true, record: { batch: record.batch, state } };
+  }
+
+  report(sessionId: string, batchId: string, report: BatchReport): ReportResult {
+    const state = this.readState(batchId);
+    if (!state) return { ok: false, reason: 'not-found' };
+    if (FINISHED.includes(state.status)) return { ok: false, reason: 'already-reported' };
+    if (state.status !== 'working') return { ok: false, reason: 'not-claimed' };
+    if (this.owner(batchId)?.sessionId !== sessionId) return { ok: false, reason: 'claimed-by-other' };
+    return { ok: true, state: this.transition(batchId, state, report.outcome, sessionId, { report }) };
+  }
+
+  cancel(sessionId: string, batchId: string): CancelResult {
+    const state = this.readState(batchId);
+    if (!state) return { ok: false, reason: 'not-found' };
+    if (state.status === 'cancelled') return { ok: true, state };
+    if (state.status !== 'queued') return { ok: false, reason: 'conflict' };
+    if (!this.takeClaim(batchId, { sessionId, pid: process.pid, at: this.now().toISOString(), kind: 'cancel' })) {
+      return { ok: false, reason: 'conflict' };
+    }
+    return { ok: true, state: this.transition(batchId, state, 'cancelled', sessionId) };
+  }
+
+  recover(): string[] {
+    const isAlive = this.opts.isAlive ?? isProcessAlive;
+    const recovered: string[] = [];
+    for (const summary of this.list(['working'])) {
+      const owner = this.owner(summary.id);
+      if (owner && owner.kind === 'claim' && isAlive(owner.pid)) continue;
+      const state = this.readState(summary.id);
+      if (!state || state.status !== 'working') continue;
+      rmSync(this.claimDir(summary.id), { recursive: true, force: true });
+      this.transition(summary.id, state, 'queued', owner?.sessionId ?? 'recovery', { note: 'interrupted' });
+      this.log(`Batch ${summary.id} was interrupted and is queued again.`);
+      recovered.push(summary.id);
+    }
+    return recovered;
+  }
+
+  prune(maxAgeMs = WEEK_MS): string[] {
+    const cutoff = this.now().getTime() - maxAgeMs;
+    const pruned: string[] = [];
+    for (const summary of this.list(['done', 'partial', 'failed', 'cancelled'])) {
+      if (Date.parse(summary.updatedAt) < cutoff) {
+        rmSync(this.batchDir(summary.id), { recursive: true, force: true });
+        pruned.push(summary.id);
+      }
+    }
+    return pruned;
   }
 }
