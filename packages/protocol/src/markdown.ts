@@ -16,6 +16,17 @@ export type RenderOptions = {
 
 const COMPONENT_NAME = /^[A-Za-z0-9_$.:@<>-]{1,200}$/;
 
+/** Sanitizes inline text from page data to prevent markdown injection. */
+function inline(text: string, max: number): string {
+  const controlCharPattern = new RegExp('[\u0000-\u001f\u007f  ]', 'g');
+  return text
+    .replace(controlCharPattern, ' ')
+    .replace(/`/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
 /** Fences text with more backticks than any run inside it, so the content cannot close the fence. */
 export function fence(text: string, lang = ''): string {
   const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
@@ -39,7 +50,8 @@ function sourceLines(hint: SourceHint, options: RenderOptions): string[] {
   const lines: string[] = [];
   if (hint.file) {
     const resolved = options.resolveSource?.(hint) ?? { path: hint.file, found: true };
-    const position = [resolved.path, hint.line, hint.column].filter((p) => p !== undefined).join(':');
+    const sanitizedPath = inline(resolved.path, 300);
+    const position = [sanitizedPath, hint.line, hint.column].filter((p) => p !== undefined).join(':');
     const tail = resolved.found ? '' : ' (reported by the page, not found in this repository)';
     lines.push(`- Source: \`${position}\` (confidence: ${hint.confidence}, via ${hint.via})${tail}`);
   } else {
@@ -108,7 +120,7 @@ function renderItem(item: RenderableItem, index: number, total: number, options:
     if (item.flow.expected) parts.push(`**Expected:**\n${quote(item.flow.expected)}`);
     if (item.flow.actual) parts.push(`**Actual:**\n${quote(item.flow.actual)}`);
   }
-  const where: string[] = [`- Page: ${item.page.url} (route ${item.page.path})`];
+  const where: string[] = [`- Page: ${inline(item.page.url, 500)} (route ${inline(item.page.path, 300)})`];
   if (item.anchor) where.push(...sourceLines(item.anchor.source, options));
   parts.push(`**Where in the code:**\n${where.join('\n')}`);
   if (item.screenshot) {
@@ -123,8 +135,8 @@ export function renderBatchMarkdown(batch: RenderableBatch, options: RenderOptio
   const header = [
     `# PickFix batch ${batch.id} — ${plural(batch.items.length, 'item')}`,
     '',
-    `- Page: ${batch.page.url}`,
-    `- Route: ${batch.page.path}`,
+    `- Page: ${inline(batch.page.url, 500)}`,
+    `- Route: ${inline(batch.page.path, 300)}`,
     `- Viewport: ${batch.viewport.width}×${batch.viewport.height} @${batch.viewport.dpr}x`,
     `- Sent: ${batch.createdAt}`,
   ];
