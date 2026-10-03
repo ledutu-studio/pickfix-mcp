@@ -40867,12 +40867,13 @@ Content-Length: 0\r
 }
 
 // src/channel.ts
+var UNSAFE = /[^A-Za-z0-9\-._~/%[\]@:+]/g;
 function safePath(path) {
-  return path.replace(/[^A-Za-z0-9\-._~/%[\]@:+]/g, "").slice(0, 200) || "/";
+  return path.replace(UNSAFE, "").slice(0, 100) || "/";
 }
 function safeOrigin(url2) {
   try {
-    return new URL(url2).host;
+    return new URL(url2).host.replace(UNSAFE, "").slice(0, 100) || "an unknown page";
   } catch {
     return "an unknown page";
   }
@@ -41601,8 +41602,12 @@ async function runServer() {
     { capabilities: { experimental: { "claude/channel": {} } }, instructions: SERVER_INSTRUCTIONS }
   );
   let resolveDeps;
-  const depsReady = new Promise((resolve4) => {
+  let rejectDeps;
+  const depsReady = new Promise((resolve4, reject) => {
     resolveDeps = resolve4;
+    rejectDeps = reject;
+  });
+  depsReady.catch(() => {
   });
   registerTools(mcp, () => depsReady);
   registerPrompts(mcp);
@@ -41672,7 +41677,10 @@ async function runServer() {
     void (bridge?.close() ?? Promise.resolve()).finally(() => process.exit(0));
   };
   mcp.server.oninitialized = () => {
-    setUp().catch((error63) => log(`Start-up failed: ${error63.stack ?? String(error63)}`));
+    setUp().catch((error63) => {
+      log(`Start-up failed: ${error63.stack ?? String(error63)}`);
+      rejectDeps(new Error(`PickFix could not start: ${error63.message ?? String(error63)}`));
+    });
   };
   mcp.server.onclose = shutdown;
   process.stdin.on("end", shutdown);

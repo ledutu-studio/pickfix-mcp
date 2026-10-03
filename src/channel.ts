@@ -3,14 +3,16 @@ import type { ServerNotification } from '@modelcontextprotocol/sdk/types.js';
 import { log as defaultLog } from './log.js';
 import type { BatchRecord } from './queue-store.js';
 
-/** Page paths are page-controlled; keep only URL path characters and a sane length. */
+const UNSAFE = /[^A-Za-z0-9\-._~/%[\]@:+]/g;
+
+/** Page paths are page-controlled; keep only URL path characters and a short length. */
 function safePath(path: string): string {
-  return path.replace(/[^A-Za-z0-9\-._~/%[\]@:+]/g, '').slice(0, 200) || '/';
+  return path.replace(UNSAFE, '').slice(0, 100) || '/';
 }
 
 function safeOrigin(url: string): string {
   try {
-    return new URL(url).host;
+    return new URL(url).host.replace(UNSAFE, '').slice(0, 100) || 'an unknown page';
   } catch {
     return 'an unknown page';
   }

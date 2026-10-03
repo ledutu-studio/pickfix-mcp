@@ -43,9 +43,12 @@ async function runServer(): Promise<void> {
     { capabilities: { experimental: { 'claude/channel': {} } }, instructions: SERVER_INSTRUCTIONS },
   );
   let resolveDeps!: (deps: ToolDeps) => void;
-  const depsReady = new Promise<ToolDeps>((resolve) => {
+  let rejectDeps!: (error: Error) => void;
+  const depsReady = new Promise<ToolDeps>((resolve, reject) => {
     resolveDeps = resolve;
+    rejectDeps = reject;
   });
+  depsReady.catch(() => {});
   registerTools(mcp, () => depsReady);
   registerPrompts(mcp);
 
@@ -121,7 +124,10 @@ async function runServer(): Promise<void> {
     void (bridge?.close() ?? Promise.resolve()).finally(() => process.exit(0));
   };
   mcp.server.oninitialized = () => {
-    setUp().catch((error) => log(`Start-up failed: ${(error as Error).stack ?? String(error)}`));
+    setUp().catch((error) => {
+      log(`Start-up failed: ${(error as Error).stack ?? String(error)}`);
+      rejectDeps(new Error(`PickFix could not start: ${(error as Error).message ?? String(error)}`));
+    });
   };
   mcp.server.onclose = shutdown;
   process.stdin.on('end', shutdown);

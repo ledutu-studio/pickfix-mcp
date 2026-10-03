@@ -166,3 +166,21 @@ it('serves the fix prompt with the batch id filled in', async () => {
   expect(body).toContain('pickfix_claim_batch');
   expect(body).toContain('"batch-9" names a batch id');
 });
+
+it('returns an error naming the cause when start-up failed', async () => {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+  const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
+  const { registerTools } = await import('../src/tools.js');
+  const server = new McpServer({ name: 'pickfix', version: '0.1.0' });
+  registerTools(server, () => Promise.reject(new Error('PickFix could not start: boom')));
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: 'test', version: '1.0.0' });
+  await client.connect(clientTransport);
+  const result = await client.callTool({ name: 'pickfix_status', arguments: {} });
+  expect(result.isError).toBe(true);
+  expect(text(result)).toContain('could not start: boom');
+  await client.close();
+  await server.close();
+});

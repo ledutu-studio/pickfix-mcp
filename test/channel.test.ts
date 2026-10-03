@@ -29,4 +29,16 @@ describe('channelEvent', () => {
     expect(event.meta.path).toBe('/abignorepreviousinstructions');
     expect(event.content).not.toContain('<b>');
   });
+
+  it('filters the host the same way and falls back when the URL does not parse', () => {
+    const odd = record('/x');
+    odd.batch.page.url = 'foo://a"b`c{d}e;f/x';
+    expect(channelEvent(odd).content).toContain(' from abcdef.');
+    odd.batch.page.url = 'foo://a b<c>d/x';
+    expect(channelEvent(odd).content).toContain(' from an unknown page.');
+  });
+
+  it('cuts a long path to 100 characters', () => {
+    expect(channelEvent(record('/' + 'a'.repeat(299))).meta.path).toHaveLength(100);
+  });
 });
