@@ -2,9 +2,14 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { QueueStore } from '../src/queue-store.js';
+import * as fsJson from '../src/fs-json.js';
 import { makeBatch, makeElementItem, PNG_1PX } from '../packages/protocol/test/fixtures.js';
 import { tempDir, tempHome } from './helpers.js';
-import { writeJson as originalWriteJson } from '../src/fs-json.js';
+
+vi.mock('../src/fs-json.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../src/fs-json.js')>();
+  return { ...real, writeJson: vi.fn(real.writeJson) };
+});
 
 function newStore(home = tempHome(), repoRoot = tempDir(), clock = { t: Date.parse('2026-10-02T10:00:00Z') }) {
   const logs: string[] = [];
@@ -77,19 +82,18 @@ describe('QueueStore.add', () => {
     expect(existsSync(store.dir)).toBe(false);
   });
 
-  it('verifies error cause is preserved on add failure', () => {
+  it('removes its temporary directory when writing fails midway', async () => {
+    const real = (await vi.importActual<typeof import('../src/fs-json.js')>('../src/fs-json.js')).writeJson;
     const { store } = newStore();
-
-    // Verify that validation errors are thrown correctly
-    // The error cause is preserved in the add() error handling for rename failures
-    expect(() => {
-      store.add(makeBatch({ items: [makeElementItem('../invalid')] }), 's');
-    }).toThrow('Invalid item id');
-
-    // Verify no temp files were created for validation errors
-    if (existsSync(store.dir)) {
-      const entries = readdirSync(store.dir);
-      expect(entries.filter((n) => n.startsWith('.tmp-'))).toEqual([]);
+    vi.mocked(fsJson.writeJson).mockImplementation((file, data) => {
+      if (String(file).includes('.tmp-')) throw new Error('disk full');
+      return real(file, data);
+    });
+    try {
+      expect(() => store.add(makeBatch(), 's')).toThrow('disk full');
+      expect(readdirSync(store.dir).filter((n) => n.startsWith('.tmp-'))).toEqual([]);
+    } finally {
+      vi.mocked(fsJson.writeJson).mockImplementation(real);
     }
   });
 });
