@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ID_PATTERN, type Batch, type BatchReport, type BatchStatus, type Item, type Screenshot } from '@pickfix/protocol';
 import { readJson, writeJson } from './fs-json.js';
@@ -61,6 +61,7 @@ const FINISHED: readonly BatchStatus[] = ['done', 'partial', 'failed', 'cancelle
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 
 export function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -249,7 +250,12 @@ export class QueueStore {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
       throw error;
     }
-    writeJson(join(this.claimDir(batchId), 'owner.json'), owner);
+    try {
+      writeJson(join(this.claimDir(batchId), 'owner.json'), owner);
+    } catch (error) {
+      rmSync(this.claimDir(batchId), { recursive: true, force: true });
+      throw error;
+    }
     return true;
   }
 
@@ -280,11 +286,17 @@ export class QueueStore {
     if (!record) return { ok: false, reason: 'not-found' };
     if (record.state.status === 'cancelled') return { ok: false, reason: 'cancelled' };
     if (FINISHED.includes(record.state.status)) return { ok: false, reason: 'finished' };
+    if (record.state.status !== 'queued') return { ok: false, reason: 'already-claimed' };
     if (!this.takeClaim(batchId, { sessionId, pid, at: this.now().toISOString(), kind: 'claim' })) {
       return { ok: false, reason: this.readState(batchId)?.status === 'cancelled' ? 'cancelled' : 'already-claimed' };
     }
-    const state = this.transition(batchId, record.state, 'working', sessionId);
-    return { ok: true, record: { batch: record.batch, state } };
+    try {
+      const state = this.transition(batchId, record.state, 'working', sessionId);
+      return { ok: true, record: { batch: record.batch, state } };
+    } catch (error) {
+      rmSync(this.claimDir(batchId), { recursive: true, force: true });
+      throw error;
+    }
   }
 
   report(sessionId: string, batchId: string, report: BatchReport): ReportResult {
@@ -304,21 +316,62 @@ export class QueueStore {
     if (!this.takeClaim(batchId, { sessionId, pid: process.pid, at: this.now().toISOString(), kind: 'cancel' })) {
       return { ok: false, reason: 'conflict' };
     }
-    return { ok: true, state: this.transition(batchId, state, 'cancelled', sessionId) };
+    try {
+      return { ok: true, state: this.transition(batchId, state, 'cancelled', sessionId) };
+    } catch (error) {
+      rmSync(this.claimDir(batchId), { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  /** Atomically takes a claim dir away from whoever owns it; false if someone else got there first. */
+  protected seizeClaim(batchId: string): string | undefined {
+    const dead = `${this.claimDir(batchId)}.dead-${randomBytes(4).toString('hex')}`;
+    try {
+      renameSync(this.claimDir(batchId), dead);
+    } catch {
+      return undefined;
+    }
+    return dead;
   }
 
   recover(): string[] {
     const isAlive = this.opts.isAlive ?? isProcessAlive;
     const recovered: string[] = [];
-    for (const summary of this.list(['working'])) {
-      const owner = this.owner(summary.id);
+    for (const summary of this.list(['working', 'queued'])) {
+      const id = summary.id;
+      const owner = this.owner(id);
       if (owner && owner.kind === 'claim' && isAlive(owner.pid)) continue;
-      const state = this.readState(summary.id);
-      if (!state || state.status !== 'working') continue;
-      rmSync(this.claimDir(summary.id), { recursive: true, force: true });
-      this.transition(summary.id, state, 'queued', owner?.sessionId ?? 'recovery', { note: 'interrupted' });
-      this.log(`Batch ${summary.id} was interrupted and is queued again.`);
-      recovered.push(summary.id);
+      if (summary.status === 'queued') {
+        // A queued batch holding a claim dir is stuck, unless a claim or cancel is in flight right now.
+        let stale: boolean;
+        if (owner) stale = owner.kind === 'claim';
+        else {
+          try {
+            stale = this.now().getTime() - statSync(this.claimDir(id)).mtimeMs > 60_000;
+          } catch {
+            continue;
+          }
+        }
+        if (!stale) continue;
+        const dead = this.seizeClaim(id);
+        if (!dead) continue;
+        rmSync(dead, { recursive: true, force: true });
+        this.log(`Batch ${id} had a stale claim; it is free again.`);
+        continue;
+      }
+      const dead = this.seizeClaim(id);
+      if (!dead) continue;
+      try {
+        const state = this.readState(id);
+        if (state?.status === 'working') {
+          this.transition(id, state, 'queued', owner?.sessionId ?? 'recovery', { note: 'interrupted' });
+          this.log(`Batch ${id} was interrupted and is queued again.`);
+          recovered.push(id);
+        }
+      } finally {
+        rmSync(dead, { recursive: true, force: true });
+      }
     }
     return recovered;
   }

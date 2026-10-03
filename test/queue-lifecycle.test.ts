@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BatchReport } from '@pickfix/protocol';
 import { describe, expect, it } from 'vitest';
@@ -104,6 +104,66 @@ describe('recover', () => {
   });
 });
 
+describe('recover safety', () => {
+  it('lets exactly one of two stores recover a dead-owner batch', () => {
+    const { a, b, alive } = setup(new Set([42]));
+    a.add(makeBatch(), 's');
+    a.claim('session-a', 42, 'batch-1');
+    alive.delete(42);
+    const results = [a.recover(), b.recover()];
+    expect(results.flat()).toEqual(['batch-1']);
+    expect(results.filter((r) => r.length === 0)).toHaveLength(1);
+    expect(a.readState('batch-1')?.status).toBe('queued');
+  });
+
+  it('refuses to claim a working batch that has no claim directory', () => {
+    const { a } = setup();
+    a.add(makeBatch(), 's');
+    const file = join(a.dir, 'batch-1', 'state.json');
+    const state = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...state, status: 'working' }));
+    expect(a.claim('s', 1, 'batch-1')).toEqual({ ok: false, reason: 'already-claimed' });
+  });
+
+  it('leaves a live fresh claim alone on a later recover', () => {
+    const { a, b, alive } = setup(new Set([42]));
+    a.add(makeBatch(), 's');
+    a.claim('session-a', 42, 'batch-1');
+    alive.delete(42);
+    alive.add(7);
+    expect(b.recover()).toEqual(['batch-1']);
+    expect(b.claim('session-b', 7, 'batch-1').ok).toBe(true);
+    expect(a.recover()).toEqual([]);
+    expect(a.readState('batch-1')?.status).toBe('working');
+    expect(a.owner('batch-1')).toMatchObject({ sessionId: 'session-b', pid: 7 });
+  });
+
+  it('frees a queued batch whose claim directory belongs to a dead process', () => {
+    const { a, b, alive } = setup(new Set([42]));
+    a.add(makeBatch(), 's');
+    const dir = join(a.dir, 'batch-1', 'claim');
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'owner.json'), JSON.stringify({ sessionId: 'x', pid: 99, at: 'now', kind: 'claim' }));
+    expect(b.claim('s', 1, 'batch-1')).toEqual({ ok: false, reason: 'already-claimed' });
+    expect(b.recover()).toEqual([]);
+    expect(existsSync(dir)).toBe(false);
+    expect(alive.has(99)).toBe(false);
+    expect(b.claim('s', 1, 'batch-1').ok).toBe(true);
+  });
+
+  it('frees an ownerless claim directory only after 60 seconds', () => {
+    const { a, clock } = setup();
+    a.add(makeBatch(), 's');
+    const dir = join(a.dir, 'batch-1', 'claim');
+    mkdirSync(dir);
+    expect(a.recover()).toEqual([]);
+    expect(existsSync(dir)).toBe(true);
+    clock.t = Date.now() + 120_000;
+    a.recover();
+    expect(existsSync(dir)).toBe(false);
+  });
+});
+
 describe('prune', () => {
   it('deletes finished batches older than seven days', () => {
     const { a, clock } = setup();
@@ -121,5 +181,7 @@ describe('isProcessAlive', () => {
   it('knows this process is alive and a huge pid is not', () => {
     expect(isProcessAlive(process.pid)).toBe(true);
     expect(isProcessAlive(2 ** 22 + 12345)).toBe(false);
+    expect(isProcessAlive(0)).toBe(false);
+    expect(isProcessAlive(-1)).toBe(false);
   });
 });
