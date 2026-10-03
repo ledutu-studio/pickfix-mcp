@@ -1,5 +1,5 @@
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { normalizeSourcePath } from '../src/source-paths.js';
 import { tempDir } from './helpers.js';
@@ -57,8 +57,9 @@ describe('normalizeSourcePath', () => {
   });
 
   it('rejects relative paths that escape via ../', () => {
-    const sibling = join(root, '..', 'sibling');
-    expect(normalizeSourcePath(`../${sibling}/file.ts`, root)).toEqual({ path: `../${sibling}/file.ts`, found: false });
+    const rel = relative(root, join(outside, 'file.ts'));
+    expect(existsSync(join(root, rel))).toBe(true);
+    expect(normalizeSourcePath(rel, root)).toEqual({ path: rel, found: false });
   });
 
   it('resolves webpack:/// with triple slash (empty namespace)', () => {
