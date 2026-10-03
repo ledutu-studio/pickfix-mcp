@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { QueueStore } from '../src/queue-store.js';
@@ -47,6 +47,54 @@ describe('QueueStore.add', () => {
     a.add(makeBatch(), 's');
     expect(b.get('batch-1')?.state.status).toBe('queued');
   });
+
+  it('recovers from quarantined batch and resubmits the same id', () => {
+    const { store } = newStore();
+    store.add(makeBatch(), 's');
+    writeFileSync(join(store.dir, 'batch-1', 'state.json'), '{broken');
+    store.list(); // Quarantines the corrupt state.json
+    // Now try to add the same batch id again
+    const { record, created } = store.add(makeBatch(), 's');
+    expect(created).toBe(true);
+    expect(record.state.status).toBe('queued');
+  });
+
+  it('validates batch id and all item ids before any filesystem work', () => {
+    const { store } = newStore();
+    expect(() => {
+      store.add(makeBatch({ id: '../x' }), 's');
+    }).toThrow('Invalid batch id');
+    // Directory should not have been created since we errored before ensureDir
+    expect(existsSync(store.dir)).toBe(false);
+
+    expect(() => {
+      store.add(makeBatch({ items: [makeElementItem('../evil')] }), 's');
+    }).toThrow('Invalid item id');
+    // Directory should still not exist
+    expect(existsSync(store.dir)).toBe(false);
+  });
+
+  it('cleans up temp directory on write failure', () => {
+    const home = tempHome();
+    const repoRoot = tempDir();
+    const { store } = newStore(home, repoRoot);
+
+    // First add a valid batch to create the queue dir
+    store.add(makeBatch({ id: 'valid' }), 's');
+
+    // Make the queue dir read-only to force a failure
+    try {
+      chmodSync(store.dir, 0o500);
+      expect(() => {
+        store.add(makeBatch({ id: 'failing' }), 's');
+      }).toThrow();
+    } finally {
+      chmodSync(store.dir, 0o700);
+    }
+
+    // Verify no temp files remain
+    expect(readdirSync(store.dir).filter((n) => n.startsWith('.'))).toEqual([]);
+  });
 });
 
 describe('QueueStore.list', () => {
@@ -67,6 +115,23 @@ describe('QueueStore.list', () => {
     expect(store.list()).toEqual([]);
     expect(readdirSync(join(store.dir, 'batch-1')).some((n) => n.startsWith('state.json.corrupt-'))).toBe(true);
     expect(logs.join('\n')).toContain('corrupt');
+  });
+
+  it('skips a corrupt batch.json', () => {
+    const { store, logs } = newStore();
+    store.add(makeBatch(), 's');
+    writeFileSync(join(store.dir, 'batch-1', 'batch.json'), '{broken');
+    expect(store.list()).toEqual([]);
+    expect(readdirSync(join(store.dir, 'batch-1')).some((n) => n.startsWith('batch.json.corrupt-'))).toBe(true);
+    expect(logs.join('\n')).toContain('corrupt');
+  });
+
+  it('skips a malformed batch.json with wrong shape', () => {
+    const { store, logs } = newStore();
+    store.add(makeBatch(), 's');
+    writeFileSync(join(store.dir, 'batch-1', 'batch.json'), '{}');
+    expect(store.list()).toEqual([]);
+    expect(logs.join('\n')).toContain('Skipping malformed batch batch-1');
   });
 });
 
