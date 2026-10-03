@@ -1,0 +1,135 @@
+import { UNTRUSTED_NOTICE } from './constants.js';
+import type { Batch, FlowStep, Item, SourceHint } from './schemas.js';
+
+/** An item whose screenshot may be stored elsewhere; only its presence matters here. */
+export type RenderableItem = Omit<Item, 'screenshot'> & { screenshot?: object };
+export type RenderableBatch = Omit<Batch, 'items'> & { items: RenderableItem[] };
+
+export type RenderOptions = {
+  /** Absolute repository root, shown in the header. */
+  repoRoot?: string;
+  /** Maps a page-reported source path to a repository path; `found: false` when the repo lacks it. */
+  resolveSource?: (hint: SourceHint) => { path: string; found: boolean } | undefined;
+  /** How the item's screenshot reaches the reader, e.g. "attached as image 1". */
+  screenshotLabel?(item: RenderableItem, index: number): string | undefined;
+};
+
+const COMPONENT_NAME = /^[A-Za-z0-9_$.:@<>-]{1,200}$/;
+
+/** Fences text with more backticks than any run inside it, so the content cannot close the fence. */
+export function fence(text: string, lang = ''): string {
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+  const ticks = '`'.repeat(Math.max(3, longest + 1));
+  return `${ticks}${lang}\n${text}\n${ticks}`;
+}
+
+function quote(text: string): string {
+  return text
+    .trim()
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n');
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+function sourceLines(hint: SourceHint, options: RenderOptions): string[] {
+  const lines: string[] = [];
+  if (hint.file) {
+    const resolved = options.resolveSource?.(hint) ?? { path: hint.file, found: true };
+    const position = [resolved.path, hint.line, hint.column].filter((p) => p !== undefined).join(':');
+    const tail = resolved.found ? '' : ' (reported by the page, not found in this repository)';
+    lines.push(`- Source: \`${position}\` (confidence: ${hint.confidence}, via ${hint.via})${tail}`);
+  } else {
+    lines.push(`- Source: not located (confidence: ${hint.confidence}, via ${hint.via})`);
+  }
+  const chain = (hint.componentChain ?? (hint.component ? [hint.component] : [])).filter((n) => COMPONENT_NAME.test(n));
+  if (chain.length > 0) lines.push(`- Component chain: ${chain.join(' ← ')}`);
+  if (hint.framework !== 'unknown') lines.push(`- Framework: ${hint.framework}`);
+  return lines;
+}
+
+function describeStep(step: FlowStep): string {
+  const where = `[${step.path}]`;
+  switch (step.type) {
+    case 'click':
+      return `${where} click <${step.anchor.tag}> "${step.anchor.text.slice(0, 80)}"`;
+    case 'input':
+      return `${where} type into <${step.anchor.tag}> ${step.masked ? '(masked value)' : `"${step.value.slice(0, 200)}"`}`;
+    case 'select':
+      return `${where} select "${step.label}" (${step.value}) in <${step.anchor.tag}>`;
+    case 'check':
+      return `${where} ${step.checked ? 'check' : 'uncheck'} <${step.anchor.tag}> "${step.anchor.text.slice(0, 80)}"`;
+    case 'key':
+      return `${where} press ${step.key}${step.anchor ? ` in <${step.anchor.tag}>` : ''}`;
+    case 'navigate':
+      return `${where} navigate (${step.cause}) to ${step.url}`;
+    case 'note':
+      return `${where} reviewer note: ${step.text}`;
+    case 'console':
+      return `${where} console ${step.level}${step.count > 1 ? ` ×${step.count}` : ''}: ${step.message}`;
+    case 'network':
+      return `${where} network ${step.method} ${step.url} → ${step.status ?? step.error ?? 'failed'}${step.count > 1 ? ` ×${step.count}` : ''}`;
+  }
+}
+
+function pageData(item: RenderableItem): string {
+  const lines: string[] = [`Page title: ${item.page.title}`];
+  const a = item.anchor;
+  if (a) {
+    lines.push(`Element: <${a.tag}>`, `Selector: ${a.selector}`);
+    if (a.text) lines.push(`Text: ${a.text}`);
+    const attributes = Object.entries(a.attributes);
+    if (attributes.length > 0) lines.push(`Attributes: ${attributes.map(([k, v]) => `${k}="${v}"`).join(' ')}`);
+    if (a.styles && Object.keys(a.styles).length > 0) {
+      lines.push(`Key styles: ${Object.entries(a.styles).map(([k, v]) => `${k}: ${v}`).join('; ')}`);
+    }
+  }
+  if (item.textEdit) lines.push(`Text before the edit: ${item.textEdit.before}`);
+  if (item.flow) {
+    lines.push('Steps:');
+    item.flow.steps.forEach((step, i) => {
+      const failing = step.id === item.flow?.failedStepId ? '  ← FAILING STEP' : '';
+      lines.push(`${i + 1}. ${describeStep(step)}${failing}`);
+    });
+  }
+  let out = fence(lines.join('\n'), 'text');
+  if (a?.html) out += `\n\n${fence(a.html.slice(0, 2000), 'html')}`;
+  return out;
+}
+
+function renderItem(item: RenderableItem, index: number, total: number, options: RenderOptions): string {
+  const parts: string[] = [`## Item ${index + 1} of ${total} · ${item.kind} · \`${item.id}\``];
+  parts.push(`**${item.kind === 'flow' ? 'Workflow title' : "Reviewer's request"}:**\n${quote(item.comment)}`);
+  if (item.textEdit) parts.push(`**Requested text (after):**\n${quote(item.textEdit.after)}`);
+  if (item.flow) {
+    if (item.flow.expected) parts.push(`**Expected:**\n${quote(item.flow.expected)}`);
+    if (item.flow.actual) parts.push(`**Actual:**\n${quote(item.flow.actual)}`);
+  }
+  const where: string[] = [`- Page: ${item.page.url} (route ${item.page.path})`];
+  if (item.anchor) where.push(...sourceLines(item.anchor.source, options));
+  parts.push(`**Where in the code:**\n${where.join('\n')}`);
+  if (item.screenshot) {
+    const label = options.screenshotLabel?.(item, index) ?? 'included in the batch file';
+    parts.push(`**Screenshot:** ${label}`);
+  }
+  parts.push(`${UNTRUSTED_NOTICE}\n\n${pageData(item)}`);
+  return parts.join('\n\n');
+}
+
+export function renderBatchMarkdown(batch: RenderableBatch, options: RenderOptions = {}): string {
+  const header = [
+    `# PickFix batch ${batch.id} — ${plural(batch.items.length, 'item')}`,
+    '',
+    `- Page: ${batch.page.url}`,
+    `- Route: ${batch.page.path}`,
+    `- Viewport: ${batch.viewport.width}×${batch.viewport.height} @${batch.viewport.dpr}x`,
+    `- Sent: ${batch.createdAt}`,
+  ];
+  if (options.repoRoot) header.push(`- Repository: ${options.repoRoot}`);
+  const items = batch.items.map((item, i) => renderItem(item, i, batch.items.length, options));
+  const footer = 'When you have finished, call pickfix_report with the outcome for each item.';
+  return `${[header.join('\n'), ...items, footer].join('\n\n')}\n`;
+}
