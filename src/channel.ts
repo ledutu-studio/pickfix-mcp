@@ -6,7 +6,7 @@ import type { BatchRecord } from './queue-store.js';
 const UNSAFE = /[^A-Za-z0-9\-._~/%[\]@:+]/g;
 
 /** Page paths are page-controlled; keep only URL path characters and a short length. */
-function safePath(path: string): string {
+export function safePath(path: string): string {
   return path.replace(UNSAFE, '').slice(0, 100) || '/';
 }
 

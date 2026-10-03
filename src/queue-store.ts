@@ -273,19 +273,23 @@ export class QueueStore {
   }
 
   claim(sessionId: string, pid: number, batchId?: string): ClaimResult {
-    if (batchId !== undefined) return this.claimOne(sessionId, pid, batchId);
+    if (batchId !== undefined) return this.claimOne(sessionId, pid, batchId, true);
     for (const summary of this.list(['queued'])) {
-      const result = this.claimOne(sessionId, pid, summary.id);
+      const result = this.claimOne(sessionId, pid, summary.id, false);
       if (result.ok) return result;
     }
     return { ok: false, reason: 'none-queued' };
   }
 
-  protected claimOne(sessionId: string, pid: number, batchId: string): ClaimResult {
+  protected claimOne(sessionId: string, pid: number, batchId: string, explicit: boolean): ClaimResult {
     const record = this.get(batchId);
     if (!record) return { ok: false, reason: 'not-found' };
     if (record.state.status === 'cancelled') return { ok: false, reason: 'cancelled' };
     if (FINISHED.includes(record.state.status)) return { ok: false, reason: 'finished' };
+    if (record.state.status === 'working' && explicit) {
+      const owner = this.owner(batchId);
+      if (owner?.kind === 'claim' && owner.sessionId === sessionId) return { ok: true, record };
+    }
     if (record.state.status !== 'queued') return { ok: false, reason: 'already-claimed' };
     if (!this.takeClaim(batchId, { sessionId, pid, at: this.now().toISOString(), kind: 'claim' })) {
       return { ok: false, reason: this.readState(batchId)?.status === 'cancelled' ? 'cancelled' : 'already-claimed' };
@@ -297,6 +301,15 @@ export class QueueStore {
       rmSync(this.claimDir(batchId), { recursive: true, force: true });
       throw error;
     }
+  }
+
+  /** Writes the full claim markdown next to the batch, for claims too large to return inline. */
+  writeBatchMarkdown(batchId: string, markdown: string): string {
+    const file = join(this.batchDir(batchId), 'batch.md');
+    const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    writeFileSync(tmp, markdown, { mode: 0o600 });
+    renameSync(tmp, file);
+    return file;
   }
 
   report(sessionId: string, batchId: string, report: BatchReport): ReportResult {

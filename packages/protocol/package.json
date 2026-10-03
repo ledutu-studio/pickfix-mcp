@@ -7,6 +7,7 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepare": "tsc -p tsconfig.build.json",
     "compile": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": { "zod": "^4.6.5" },

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { LIMITS, batchReportSchema, batchSchema, renderBatchMarkdown, type BatchStatus, type Session } from '@pickfix/protocol';
 import type { BatchRecord, QueueStore } from './queue-store.js';
+import { safePath } from './channel.js';
 import { normalizeSourcePath } from './source-paths.js';
 
 export const MAX_IMAGES_PER_CLAIM = 8;
@@ -25,25 +26,57 @@ const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] })
 const error = (text: string): ToolResult => ({ content: [{ type: 'text', text }], isError: true });
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+const MAX_INLINE_CHARS = 60_000;
+const MAX_CLAIM_CHARS = 80_000;
+const IMAGE_COST_CHARS = 1_600 * 4;
+
+function compactLine(text: string, max: number): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ').replace(/`/g, "'").replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
 function claimMarkdown(deps: ToolDeps, record: BatchRecord): ToolResult {
+  const { batch } = record;
+  const resolveSource = (hint: { file?: string }) => (hint.file ? normalizeSourcePath(hint.file, deps.repoRoot) : undefined);
+  const render = (labels: Map<string, string>) =>
+    renderBatchMarkdown(batch, { repoRoot: deps.repoRoot, resolveSource, screenshotLabel: (item) => labels.get(item.id) });
+
+  const full = render(new Map());
+  const oversized = full.length > MAX_INLINE_CHARS;
+
+  // Claude Code truncates tool output near 25,000 tokens: an oversized batch returns a compact index and a file.
+  let compact = '';
+  if (oversized) {
+    const header = full.split('\n\n')[0];
+    const lines = batch.items.map((item, i) => {
+      const source = item.anchor?.source.file ? resolveSource(item.anchor.source) : undefined;
+      const line = source && item.anchor?.source.line !== undefined ? `:${item.anchor.source.line}` : '';
+      const where = source ? ` — ${compactLine(source.path, 200)}${line}` : '';
+      return `- Item ${i + 1} · ${item.kind} · ${item.id}: ${compactLine(item.comment, 200)}${where}`;
+    });
+    compact = `${header}\n\n${lines.join('\n')}`;
+  }
+  const textLength = oversized ? compact.length + 400 : full.length;
+
   const images: Content[] = [];
   const labels = new Map<string, string>();
-  for (const item of record.batch.items) {
-    const path = deps.store.screenshotPath(record.batch.id, item);
+  for (const item of batch.items) {
+    const path = deps.store.screenshotPath(batch.id, item);
     if (!item.screenshot || !path) continue;
-    if (images.length < MAX_IMAGES_PER_CLAIM) {
-      images.push({ type: 'image', data: deps.store.screenshotBase64(record.batch.id, item)!, mimeType: item.screenshot.mime });
+    const withinBudget = textLength + (images.length + 1) * IMAGE_COST_CHARS <= MAX_CLAIM_CHARS;
+    if (images.length < MAX_IMAGES_PER_CLAIM && withinBudget) {
+      images.push({ type: 'image', data: deps.store.screenshotBase64(batch.id, item)!, mimeType: item.screenshot.mime });
       labels.set(item.id, `attached as image ${images.length} (also at ${path})`);
     } else {
       labels.set(item.id, `not attached (too many images); read it from ${path}`);
     }
   }
-  const markdown = renderBatchMarkdown(record.batch, {
-    repoRoot: deps.repoRoot,
-    resolveSource: (hint) => (hint.file ? normalizeSourcePath(hint.file, deps.repoRoot) : undefined),
-    screenshotLabel: (item) => labels.get(item.id),
-  });
-  return { content: [{ type: 'text', text: markdown }, ...images] };
+
+  const markdown = render(labels);
+  if (!oversized) return { content: [{ type: 'text', text: markdown }, ...images] };
+  const filePath = deps.store.writeBatchMarkdown(batch.id, markdown);
+  const text = `${compact}\n\nThe full batch with all page data is at ${filePath}. Read it before editing.`;
+  return { content: [{ type: 'text', text }, ...images] };
 }
 
 export function registerTools(server: McpServer, getDeps: () => Promise<ToolDeps>): void {
@@ -89,7 +122,7 @@ export function registerTools(server: McpServer, getDeps: () => Promise<ToolDeps
       if (batches.length === 0) return ok(`No PickFix batches with status ${statuses.join(' or ')} in this repository.`);
       return ok(
         batches
-          .map((b) => `- ${b.id} · ${b.status} · ${plural(b.items, 'item')} · ${b.path} on ${b.origin} · received ${b.receivedAt}`)
+          .map((b) => `- ${b.id} · ${b.status} · ${plural(b.items, 'item')} · ${safePath(b.path)} on ${b.origin} · received ${b.receivedAt}`)
           .join('\n'),
       );
     },
@@ -108,10 +141,11 @@ export function registerTools(server: McpServer, getDeps: () => Promise<ToolDeps
       const result = deps.store.claim(deps.session.sessionId, deps.session.pid, batchId);
       if (!result.ok) {
         const id = batchId ?? '';
+        const holder = batchId ? deps.store.owner(batchId)?.sessionId : undefined;
         const reasons = {
           'none-queued': 'No queued PickFix batches in this repository.',
           'not-found': `No batch "${id}" in this repository. Call pickfix_list_batches to see the available ids.`,
-          'already-claimed': `Batch ${id} is already claimed by another session. Do not work on it.`,
+          'already-claimed': `Batch ${id} is being handled by another session${holder ? ` (${holder})` : ''}. Do not work on it.`,
           cancelled: `Batch ${id} was cancelled by the reviewer. Do not work on it.`,
           finished: `Batch ${id} is already finished.`,
         } as const;

@@ -120,6 +120,7 @@ async function runServer(): Promise<void> {
   const shutdown = () => {
     if (closing) return;
     closing = true;
+    setTimeout(() => process.exit(0), 2000).unref();
     if (recoveryTimer) clearInterval(recoveryTimer);
     void (bridge?.close() ?? Promise.resolve()).finally(() => process.exit(0));
   };

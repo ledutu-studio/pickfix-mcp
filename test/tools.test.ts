@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Session } from '@pickfix/protocol';
@@ -67,6 +67,14 @@ describe('pickfix_list_batches', () => {
     expect(text(await call('pickfix_list_batches'))).toContain('batch-1 · queued · 1 item · /checkout on localhost:5173');
   });
 
+  it('prints the page path sanitised on one line', async () => {
+    const item = makeElementItem();
+    deps.store.add(makeBatch({ page: { url: 'http://localhost:5173/x', path: '/a\n<b>bold', title: 'T' }, items: [item] }), 's');
+    const out = text(await call('pickfix_list_batches'));
+    expect(out.split('\n')).toHaveLength(1);
+    expect(out).not.toContain('<');
+  });
+
   it('says when there is nothing', async () => {
     expect(text(await call('pickfix_list_batches'))).toContain('No PickFix batches');
   });
@@ -85,6 +93,14 @@ describe('pickfix_claim_batch', () => {
     expect(changed).toEqual(['batch-1']);
   });
 
+  it('lets the owning session claim its working batch again', async () => {
+    deps.store.add(makeBatch(), 's');
+    await call('pickfix_claim_batch', { batchId: 'batch-1' });
+    const again = (await call('pickfix_claim_batch', { batchId: 'batch-1' })) as { isError?: boolean };
+    expect(again.isError).toBeFalsy();
+    expect(text(again)).toContain('# PickFix batch batch-1');
+  });
+
   it('is an error when nothing is queued', async () => {
     const result = (await call('pickfix_claim_batch')) as { isError?: boolean };
     expect(result.isError).toBe(true);
@@ -98,10 +114,43 @@ describe('pickfix_claim_batch', () => {
       await call('pickfix_claim_batch', { batchId: 'batch-1' });
       const second = (await other.client.callTool({ name: 'pickfix_claim_batch', arguments: { batchId: 'batch-1' } })) as { isError?: boolean };
       expect(second.isError).toBe(true);
-      expect(text(second)).toContain('already claimed by another session');
+      expect(text(second)).toContain('is being handled by another session (session-a). Do not work on it.');
     } finally {
       await other.close();
     }
+  });
+});
+
+describe('pickfix_claim_batch size budget', () => {
+  const bigBatch = () =>
+    makeBatch({
+      items: Array.from({ length: 50 }, (_, i) => {
+        const item = makeElementItem(`item-${i + 1}`);
+        return { ...item, comment: `Request ${i + 1}: ${'x'.repeat(300)}`, anchor: { ...item.anchor!, html: `<div>${'y'.repeat(1900)}</div>` } };
+      }),
+    });
+
+  it('returns a compact summary and writes the full batch to batch.md', async () => {
+    deps.store.add(bigBatch(), 's');
+    const result = (await call('pickfix_claim_batch')) as { content: { type: string }[] };
+    const out = text(result);
+    const path = /at (\S+batch\.md)\./.exec(out)?.[1];
+    expect(path).toBeDefined();
+    expect(out.length).toBeLessThan(60_000);
+    expect(out).toContain('- Item 1 · element · item-1: Request 1: ');
+    expect(out).toContain('Read it before editing.');
+    expect(existsSync(path!)).toBe(true);
+    const full = readFileSync(path!, 'utf8');
+    expect(full.length).toBeGreaterThan(60_000);
+    expect(full).toContain('## Item 50 of 50');
+    expect(result.content.filter((c) => c.type === 'image').length).toBeLessThanOrEqual(8);
+  });
+
+  it('leaves a small batch unchanged', async () => {
+    deps.store.add(makeBatch(), 's');
+    const out = text(await call('pickfix_claim_batch'));
+    expect(out).toContain('## Item 1 of 1');
+    expect(out).not.toContain('batch.md');
   });
 });
 

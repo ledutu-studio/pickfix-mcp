@@ -141,7 +141,7 @@ Rendered by `renderBatchMarkdown` in `@pickfix/protocol`, so the extension's **C
 ### 4.6 Pairing
 
 - `pickfix_pair_code` (or `npx pickfix-mcp pair`) writes `~/.pickfix/pairing.json` with a random 6-digit code, an expiry 2 minutes ahead and an attempt counter. One code is valid at a time per machine; any server on the machine accepts it, because they share the file.
-- The extension sends `pair { code }` (5.3). A correct code answers `paired { token }` and deletes the file. Each wrong attempt increments the counter; the fifth deletes the code.
+- The extension sends `pair { code }` (5.3) to one server only (any server on the machine accepts the shared code). A correct code answers `paired { token }` and deletes the file. Each wrong attempt increments the counter; the fifth deletes the code.
 - The token never appears in tool output, logs or the code file.
 
 ### 4.7 Hook
@@ -173,7 +173,7 @@ export const BATCH_SCHEMA = 'pickfix.batch/1';
 - At the upgrade the server requires `Host` to be `127.0.0.1:<port>` or `localhost:<port>`, and `Origin` to be `chrome-extension://<id>` for an id in the allowed set: PickFix's published id (pinned by the manifest `key`) plus any ids in `PICKFIX_EXTENSION_IDS` (comma-separated, for development builds). Otherwise it answers 403 and does not upgrade.
 - On connect the server sends `server.info`. Before authentication it accepts only `hello`, `pair` and `ping`; anything else, or no `hello`/`pair` within 10 s, closes the connection. At most 20 failed `hello`/`pair` attempts per minute are accepted per server; further ones close immediately.
 - Tokens are compared in constant time.
-- Messages are UTF-8 JSON text frames of at most `MAX_MESSAGE_BYTES` (`maxPayload`), validated with zod on both sides; unknown fields are dropped; invalid messages answer `error { code: 'invalid' }`.
+- Messages are UTF-8 JSON text frames of at most `MAX_MESSAGE_BYTES` (`maxPayload`), validated with zod on both sides; unknown fields are dropped; invalid messages answer `error { code: 'invalid' }`. A frame larger than `MAX_MESSAGE_BYTES` + 1 MiB is closed by the WebSocket layer with close code 1009, which clients must treat as too-large.
 - At most 20 `batch.submit` per minute per connection (`rate-limited` beyond).
 
 ### 5.3 Messages

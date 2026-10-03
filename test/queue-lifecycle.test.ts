@@ -36,6 +36,19 @@ describe('claim', () => {
     expect(results.find((r) => !r.ok)).toEqual({ ok: false, reason: 'already-claimed' });
   });
 
+  it('hands a working batch back to the session that owns it, and refuses others', () => {
+    const { a, b } = setup();
+    a.add(makeBatch({ id: 'batch-1' }), 's');
+    a.claim('session-a', 1, 'batch-1');
+    const before = a.get('batch-1')!.state;
+    const again = a.claim('session-a', 1, 'batch-1');
+    expect(again.ok).toBe(true);
+    expect(a.get('batch-1')!.state).toEqual(before);
+    expect(a.get('batch-1')!.state.history).toHaveLength(2);
+    expect(b.claim('session-b', 2, 'batch-1')).toEqual({ ok: false, reason: 'already-claimed' });
+    expect(a.claim('session-a', 1)).toEqual({ ok: false, reason: 'none-queued' });
+  });
+
   it('skips claimed batches when picking the oldest', () => {
     const { a, b, clock } = setup();
     a.add(makeBatch({ id: 'first' }), 's');

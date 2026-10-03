@@ -14,6 +14,9 @@ export type RenderOptions = {
   screenshotLabel?(item: RenderableItem, index: number): string | undefined;
 };
 
+/** Slices can split a surrogate pair; the model API rejects unpaired surrogates. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 const COMPONENT_NAME = /^[A-Za-z0-9_$.:@<>-]{1,200}$/;
 
 /** Sanitizes inline text from page data to prevent markdown injection. */
@@ -138,10 +141,10 @@ export function renderBatchMarkdown(batch: RenderableBatch, options: RenderOptio
     `- Page: ${inline(batch.page.url, 500)}`,
     `- Route: ${inline(batch.page.path, 300)}`,
     `- Viewport: ${batch.viewport.width}×${batch.viewport.height} @${batch.viewport.dpr}x`,
-    `- Sent: ${batch.createdAt}`,
+    `- Sent: ${inline(batch.createdAt, 64)}`,
   ];
   if (options.repoRoot) header.push(`- Repository: ${options.repoRoot}`);
   const items = batch.items.map((item, i) => renderItem(item, i, batch.items.length, options));
   const footer = 'When you have finished, call pickfix_report with the outcome for each item.';
-  return `${[header.join('\n'), ...items, footer].join('\n\n')}\n`;
+  return `${[header.join('\n'), ...items, footer].join('\n\n')}\n`.replace(LONE_SURROGATE, '\uFFFD');
 }

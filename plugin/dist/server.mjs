@@ -40408,6 +40408,7 @@ function encodeMessage(message) {
 }
 
 // packages/protocol/src/markdown.ts
+var LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 var COMPONENT_NAME = /^[A-Za-z0-9_$.:@<>-]{1,200}$/;
 function inline(text, max) {
   const controlCharPattern = new RegExp("[\0-\x7F\u2028\u2029]", "g");
@@ -40523,13 +40524,13 @@ function renderBatchMarkdown(batch, options = {}) {
     `- Page: ${inline(batch.page.url, 500)}`,
     `- Route: ${inline(batch.page.path, 300)}`,
     `- Viewport: ${batch.viewport.width}\xD7${batch.viewport.height} @${batch.viewport.dpr}x`,
-    `- Sent: ${batch.createdAt}`
+    `- Sent: ${inline(batch.createdAt, 64)}`
   ];
   if (options.repoRoot) header.push(`- Repository: ${options.repoRoot}`);
   const items = batch.items.map((item, i) => renderItem(item, i, batch.items.length, options));
   const footer = "When you have finished, call pickfix_report with the outcome for each item.";
   return `${[header.join("\n"), ...items, footer].join("\n\n")}
-`;
+`.replace(LONE_SURROGATE, "\uFFFD");
 }
 
 // src/bridge.ts
@@ -41245,18 +41246,22 @@ var QueueStore = class {
     return readJson(join4(this.dir, batchId, "claim", "owner.json"), this.log);
   }
   claim(sessionId, pid, batchId) {
-    if (batchId !== void 0) return this.claimOne(sessionId, pid, batchId);
+    if (batchId !== void 0) return this.claimOne(sessionId, pid, batchId, true);
     for (const summary of this.list(["queued"])) {
-      const result = this.claimOne(sessionId, pid, summary.id);
+      const result = this.claimOne(sessionId, pid, summary.id, false);
       if (result.ok) return result;
     }
     return { ok: false, reason: "none-queued" };
   }
-  claimOne(sessionId, pid, batchId) {
+  claimOne(sessionId, pid, batchId, explicit) {
     const record2 = this.get(batchId);
     if (!record2) return { ok: false, reason: "not-found" };
     if (record2.state.status === "cancelled") return { ok: false, reason: "cancelled" };
     if (FINISHED.includes(record2.state.status)) return { ok: false, reason: "finished" };
+    if (record2.state.status === "working" && explicit) {
+      const owner = this.owner(batchId);
+      if (owner?.kind === "claim" && owner.sessionId === sessionId) return { ok: true, record: record2 };
+    }
     if (record2.state.status !== "queued") return { ok: false, reason: "already-claimed" };
     if (!this.takeClaim(batchId, { sessionId, pid, at: this.now().toISOString(), kind: "claim" })) {
       return { ok: false, reason: this.readState(batchId)?.status === "cancelled" ? "cancelled" : "already-claimed" };
@@ -41268,6 +41273,14 @@ var QueueStore = class {
       rmSync2(this.claimDir(batchId), { recursive: true, force: true });
       throw error63;
     }
+  }
+  /** Writes the full claim markdown next to the batch, for claims too large to return inline. */
+  writeBatchMarkdown(batchId, markdown) {
+    const file2 = join4(this.batchDir(batchId), "batch.md");
+    const tmp = `${file2}.${process.pid}.${randomBytes3(4).toString("hex")}.tmp`;
+    writeFileSync4(tmp, markdown, { mode: 384 });
+    renameSync4(tmp, file2);
+    return file2;
   }
   report(sessionId, batchId, report) {
     const state = this.readState(batchId);
@@ -41411,25 +41424,52 @@ var MAX_IMAGES_PER_CLAIM = 8;
 var ok = (text) => ({ content: [{ type: "text", text }] });
 var error62 = (text) => ({ content: [{ type: "text", text }], isError: true });
 var plural3 = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+var MAX_INLINE_CHARS = 6e4;
+var MAX_CLAIM_CHARS = 8e4;
+var IMAGE_COST_CHARS = 1600 * 4;
+function compactLine(text, max) {
+  return text.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, " ").replace(/`/g, "'").replace(/\s+/g, " ").trim().slice(0, max);
+}
 function claimMarkdown(deps, record2) {
+  const { batch } = record2;
+  const resolveSource = (hint) => hint.file ? normalizeSourcePath(hint.file, deps.repoRoot) : void 0;
+  const render = (labels2) => renderBatchMarkdown(batch, { repoRoot: deps.repoRoot, resolveSource, screenshotLabel: (item) => labels2.get(item.id) });
+  const full = render(/* @__PURE__ */ new Map());
+  const oversized = full.length > MAX_INLINE_CHARS;
+  let compact = "";
+  if (oversized) {
+    const header = full.split("\n\n")[0];
+    const lines = batch.items.map((item, i) => {
+      const source = item.anchor?.source.file ? resolveSource(item.anchor.source) : void 0;
+      const line = source && item.anchor?.source.line !== void 0 ? `:${item.anchor.source.line}` : "";
+      const where = source ? ` \u2014 ${compactLine(source.path, 200)}${line}` : "";
+      return `- Item ${i + 1} \xB7 ${item.kind} \xB7 ${item.id}: ${compactLine(item.comment, 200)}${where}`;
+    });
+    compact = `${header}
+
+${lines.join("\n")}`;
+  }
+  const textLength = oversized ? compact.length + 400 : full.length;
   const images = [];
   const labels = /* @__PURE__ */ new Map();
-  for (const item of record2.batch.items) {
-    const path = deps.store.screenshotPath(record2.batch.id, item);
+  for (const item of batch.items) {
+    const path = deps.store.screenshotPath(batch.id, item);
     if (!item.screenshot || !path) continue;
-    if (images.length < MAX_IMAGES_PER_CLAIM) {
-      images.push({ type: "image", data: deps.store.screenshotBase64(record2.batch.id, item), mimeType: item.screenshot.mime });
+    const withinBudget = textLength + (images.length + 1) * IMAGE_COST_CHARS <= MAX_CLAIM_CHARS;
+    if (images.length < MAX_IMAGES_PER_CLAIM && withinBudget) {
+      images.push({ type: "image", data: deps.store.screenshotBase64(batch.id, item), mimeType: item.screenshot.mime });
       labels.set(item.id, `attached as image ${images.length} (also at ${path})`);
     } else {
       labels.set(item.id, `not attached (too many images); read it from ${path}`);
     }
   }
-  const markdown = renderBatchMarkdown(record2.batch, {
-    repoRoot: deps.repoRoot,
-    resolveSource: (hint) => hint.file ? normalizeSourcePath(hint.file, deps.repoRoot) : void 0,
-    screenshotLabel: (item) => labels.get(item.id)
-  });
-  return { content: [{ type: "text", text: markdown }, ...images] };
+  const markdown = render(labels);
+  if (!oversized) return { content: [{ type: "text", text: markdown }, ...images] };
+  const filePath = deps.store.writeBatchMarkdown(batch.id, markdown);
+  const text = `${compact}
+
+The full batch with all page data is at ${filePath}. Read it before editing.`;
+  return { content: [{ type: "text", text }, ...images] };
 }
 function registerTools(server, getDeps) {
   server.registerTool(
@@ -41472,7 +41512,7 @@ function registerTools(server, getDeps) {
       const batches = deps.store.list(statuses);
       if (batches.length === 0) return ok(`No PickFix batches with status ${statuses.join(" or ")} in this repository.`);
       return ok(
-        batches.map((b) => `- ${b.id} \xB7 ${b.status} \xB7 ${plural3(b.items, "item")} \xB7 ${b.path} on ${b.origin} \xB7 received ${b.receivedAt}`).join("\n")
+        batches.map((b) => `- ${b.id} \xB7 ${b.status} \xB7 ${plural3(b.items, "item")} \xB7 ${safePath(b.path)} on ${b.origin} \xB7 received ${b.receivedAt}`).join("\n")
       );
     }
   );
@@ -41488,10 +41528,11 @@ function registerTools(server, getDeps) {
       const result = deps.store.claim(deps.session.sessionId, deps.session.pid, batchId);
       if (!result.ok) {
         const id = batchId ?? "";
+        const holder = batchId ? deps.store.owner(batchId)?.sessionId : void 0;
         const reasons = {
           "none-queued": "No queued PickFix batches in this repository.",
           "not-found": `No batch "${id}" in this repository. Call pickfix_list_batches to see the available ids.`,
-          "already-claimed": `Batch ${id} is already claimed by another session. Do not work on it.`,
+          "already-claimed": `Batch ${id} is being handled by another session${holder ? ` (${holder})` : ""}. Do not work on it.`,
           cancelled: `Batch ${id} was cancelled by the reviewer. Do not work on it.`,
           finished: `Batch ${id} is already finished.`
         };
@@ -41673,6 +41714,7 @@ async function runServer() {
   const shutdown = () => {
     if (closing) return;
     closing = true;
+    setTimeout(() => process.exit(0), 2e3).unref();
     if (recoveryTimer) clearInterval(recoveryTimer);
     void (bridge?.close() ?? Promise.resolve()).finally(() => process.exit(0));
   };

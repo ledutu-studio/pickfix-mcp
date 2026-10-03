@@ -10,6 +10,25 @@ describe('fence', () => {
 });
 
 describe('renderBatchMarkdown', () => {
+  it('leaves no lone surrogate when a slice splits an emoji', () => {
+    const anchor = { tag: 'a', text: `${'a'.repeat(79)}😀` };
+    const item = {
+      id: 'flow-1',
+      kind: 'flow',
+      comment: 'x',
+      page: { url: 'http://localhost:5173/', path: '/', title: 'Home' },
+      flow: {
+        startedAt: '2026-10-02T10:00:00Z',
+        endedAt: '2026-10-02T10:01:00Z',
+        steps: [{ id: 's1', at: '2026-10-02T10:00:01Z', path: '/', type: 'click', anchor }],
+      },
+      createdAt: '2026-10-02T10:01:00Z',
+    } as unknown as Item;
+    const batch = makeBatch({ items: [item] });
+    const md = renderBatchMarkdown(batch);
+    expect(md).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  });
+
   it('starts with a header naming the batch, page and repository', () => {
     const md = renderBatchMarkdown(makeBatch(), { repoRoot: '/Users/dev/shop' });
     expect(md).toContain('# PickFix batch batch-1 — 1 item');
