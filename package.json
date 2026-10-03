@@ -12,8 +12,7 @@
     "build": "node scripts/bundle.mjs",
     "test": "vitest run",
     "test:e2e": "node scripts/bundle.mjs && vitest run --config vitest.e2e.config.ts",
-    "compile": "tsc --noEmit && pnpm --filter @pickfix/protocol compile",
-    "extension-key": "node scripts/generate-extension-key.mjs"
+    "compile": "tsc --noEmit && pnpm --filter @pickfix/protocol compile"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.31.0",

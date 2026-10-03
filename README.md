@@ -88,6 +88,6 @@ pnpm compile       # type-check
 pnpm --filter @pickfix/protocol build   # build the protocol package the extension links to
 ```
 
-`PICKFIX_EXTENSION_IDS=<id>[,<id>]` allows extra extension ids, for unpacked development builds signed with another key.
+`PICKFIX_EXTENSION_IDS=<id>[,<id>]` allows extra extension ids, for unpacked builds made without the PickFix key.
 
-The extension's id comes from the key created by `pnpm extension-key` (kept at `~/.pickfix-signing/pickfix-extension.pem`, outside every repository). Back that file up: losing it means a new extension id and a protocol release.
+The extension's id is its Chrome Web Store item id, `eehanlcaccamfaalnfcikkdneffjkife`. `EXTENSION_PUBLIC_KEY` in `@pickfix/protocol` is that item's public key (Developer Dashboard → Package → View public key); Google holds the private key, so nothing secret lives on a developer machine.
