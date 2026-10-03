@@ -146,35 +146,32 @@ export class QueueStore {
     try {
       renameSync(tmp, this.batchDir(batch.id));
     } catch (error) {
-      rmSync(tmp, { recursive: true, force: true });
-      if ((error as NodeJS.ErrnoException).code === 'ENOTEMPTY') {
-        // Directory exists; check if it's valid or quarantined
-        const raced = this.get(batch.id);
-        if (raced) {
-          // Another process created a valid batch; use that
-          return { record: raced, created: false };
-        }
-        // The existing directory is invalid (quarantined); move it aside and retry
+      const errCode = (error as NodeJS.ErrnoException).code;
+      if ((errCode === 'ENOTEMPTY' || errCode === 'EEXIST') && !this.get(batch.id)) {
+        // Directory exists but invalid (quarantined); move it aside and retry with same tmp
         const quarantined = join(this.dir, `.corrupt-${batch.id}-${Date.now()}`);
         try {
           renameSync(this.batchDir(batch.id), quarantined);
           this.log(`Quarantined existing batch directory: ${quarantined}`);
         } catch {
-          // Could not quarantine; rethrow original error
+          // Could not quarantine; clean up tmp and rethrow
+          rmSync(tmp, { recursive: true, force: true });
           throw new Error(`Could not store batch ${batch.id}.`, { cause: error });
         }
-        // Retry the temp directory move once
-        const tmpRetry = join(this.dir, `.tmp-${batch.id}-${process.pid}-${randomBytes(4).toString('hex')}`);
+        // Retry the move with the same tmp dir (which has screenshots)
         try {
-          mkdirSync(tmpRetry, { mode: 0o700 });
-          writeJson(join(tmpRetry, 'batch.json'), stored);
-          writeJson(join(tmpRetry, 'state.json'), state);
-          renameSync(tmpRetry, this.batchDir(batch.id));
+          renameSync(tmp, this.batchDir(batch.id));
         } catch (retryError) {
-          rmSync(tmpRetry, { recursive: true, force: true });
+          rmSync(tmp, { recursive: true, force: true });
           throw new Error(`Could not store batch ${batch.id}.`, { cause: retryError });
         }
       } else {
+        rmSync(tmp, { recursive: true, force: true });
+        if (errCode === 'ENOTEMPTY' || errCode === 'EEXIST') {
+          // Directory exists and valid; use it
+          const raced = this.get(batch.id);
+          if (raced) return { record: raced, created: false };
+        }
         throw new Error(`Could not store batch ${batch.id}.`, { cause: error });
       }
     }
