@@ -1,0 +1,14 @@
+{
+  "name": "@pickfix/protocol",
+  "version": "0.1.0",
+  "description": "Wire protocol, schemas and batch markdown shared by the PickFix extension and pickfix-mcp.",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "compile": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": { "zod": "^4.6.5" },
+  "devDependencies": { "typescript": "^7.0.2" }
+}
