@@ -3,7 +3,7 @@ import { EXTENSION_ID, parseServerMessage, type ServerMessage } from '@pickfix/p
 
 export type TestClient = {
   ws: WebSocket;
-  next(): Promise<ServerMessage>;
+  next(timeoutMs?: number): Promise<ServerMessage>;
   send(message: unknown): void;
   sendRaw(text: string): void;
   closed: Promise<number>;
@@ -35,11 +35,11 @@ export function connect(port: number, options: Options = {}): Promise<TestClient
       resolve({
         ws,
         closed,
-        next: () =>
+        next: (timeoutMs = 3000) =>
           new Promise<ServerMessage>((res, rej) => {
             const queued = queue.shift();
             if (queued) return res(queued);
-            const timer = setTimeout(() => rej(new Error('No message within 3 s')), 3000);
+            const timer = setTimeout(() => rej(new Error('No message within the timeout')), timeoutMs);
             waiters.push((m) => {
               clearTimeout(timer);
               res(m);

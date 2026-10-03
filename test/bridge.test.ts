@@ -1,3 +1,4 @@
+import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MAX_MESSAGE_BYTES, type Session } from '@pickfix/protocol';
 import { startBridge, type Bridge } from '../src/bridge.js';
@@ -74,7 +75,61 @@ describe('connection guard', () => {
   });
 });
 
+describe('connection guard resilience', () => {
+  it('survives a client that resets a refused upgrade', async () => {
+    const socket = net.connect(bridge.port, '127.0.0.1');
+    await new Promise<void>((resolve) => socket.once('connect', resolve));
+    socket.on('error', () => {});
+    socket.write(
+      `GET /pickfix HTTP/1.1\r\nHost: 127.0.0.1:${bridge.port}\r\nOrigin: http://evil.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    socket.resetAndDestroy();
+    await new Promise((r) => setTimeout(r, 100));
+    await authed();
+  });
+});
+
 describe('authentication', () => {
+  it('closes after 20 failed pairing attempts, even for the right token', async () => {
+    pairing = 'invalid';
+    const first = await connect(bridge.port);
+    await first.next();
+    for (let i = 0; i < 20; i++) {
+      first.send({ v: 1, type: 'pair', code: '000000' });
+      expect(await first.next()).toMatchObject({ type: 'error', code: 'pairing-failed' });
+    }
+    const second = await connect(bridge.port);
+    await second.next();
+    second.send(hello('t'.repeat(64)));
+    expect(await second.closed).toBe(1008);
+  });
+
+  it('closes on invalid, too-large and rpc frames before authentication', async () => {
+    const bad = await connect(bridge.port);
+    await bad.next();
+    bad.sendRaw('not json');
+    expect(await bad.next()).toMatchObject({ type: 'error', code: 'invalid' });
+    expect(await bad.closed).toBe(1008);
+    const big = await connect(bridge.port);
+    await big.next();
+    big.sendRaw(`"${'x'.repeat(MAX_MESSAGE_BYTES)}"`);
+    expect(await big.next()).toMatchObject({ type: 'error', code: 'too-large' });
+    expect(await big.closed).toBe(1008);
+    const rpc = await connect(bridge.port);
+    await rpc.next();
+    rpc.sendRaw('{"v":1,"type":"rpc.request","requestId":"x","method":"reload"}');
+    expect(await rpc.closed).toBe(1008);
+  });
+
+  it('checks the token again on a repeated hello', async () => {
+    const client = await authed();
+    token = 'n'.repeat(64);
+    client.send(hello('t'.repeat(64)));
+    expect(await client.next()).toMatchObject({ type: 'error', code: 'unauthorized' });
+    expect(await client.closed).toBe(1008);
+  });
+
   it('welcomes the right token', async () => {
     await authed();
   });
@@ -183,6 +238,7 @@ describe('batches', () => {
     const otherSession = new QueueStore({ home, repoRoot, log: () => {} });
     otherSession.report('session-a', 'batch-1', { outcome: 'done', summary: 'Fixed.', changedFiles: [], items: [] });
     expect(await client.next()).toMatchObject({ type: 'batch.status', status: 'done', report: { summary: 'Fixed.' } });
+    await expect(client.next(150)).rejects.toThrow('No message');
   });
 
   it('answers batch.watch with the current status of known batches', async () => {

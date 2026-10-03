@@ -47,6 +47,8 @@ function stateKey(state: BatchState): string {
   return `${state.status}|${state.history.length}|${state.updatedAt}`;
 }
 
+const TERMINAL = new Set<string>(['done', 'partial', 'failed', 'cancelled']);
+
 const PAIRING_MESSAGES = {
   invalid: 'That pairing code is not valid. Run /pickfix:pair in Claude Code to get a new one.',
   expired: 'That pairing code has expired. Run /pickfix:pair in Claude Code again.',
@@ -90,6 +92,8 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
   const failures = new WindowCounter(20, 60_000);
 
   server.on('upgrade', (req, socket, head) => {
+    // Node removes its own error listener before 'upgrade'; a reset must not become an unhandled error.
+    socket.on('error', (error) => log(`Upgrade socket error: ${error.message}`));
     const check = checkUpgrade(req, port, deps.origins);
     if (!check.ok) {
       socket.end(`HTTP/1.1 ${check.status} ${check.status === 403 ? 'Forbidden' : 'Not Found'}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
@@ -111,6 +115,8 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
     if (!state || conn.watched.get(batchId) === stateKey(state)) return;
     conn.watched.set(batchId, stateKey(state));
     send(conn, statusMessage(batchId, state));
+    // A finished batch never changes again, so stop polling it.
+    if (TERMINAL.has(state.status)) conn.watched.delete(batchId);
   }
 
   function accept(ws: WebSocket): void {
@@ -143,11 +149,13 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
   function onMessage(conn: Connection, buffer: Buffer): void {
     if (buffer.length > MAX_MESSAGE_BYTES) {
       fail(conn, 'too-large', 'The message is larger than 15 MB. Send fewer items or remove some screenshots.');
+      if (!conn.authed) conn.ws.close(1008, 'Message too large');
       return;
     }
     const parsed = parseClientMessage(buffer.toString('utf8'));
     if (!parsed.ok) {
       if (!parsed.ignore) fail(conn, 'invalid', parsed.error);
+      if (!conn.authed) conn.ws.close(1008, 'Not authenticated');
       return;
     }
     const message = parsed.message;
@@ -161,7 +169,7 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
     }
     switch (message.type) {
       case 'hello':
-        return send(conn, { v: 1, type: 'welcome', session: deps.session });
+        return onHello(conn, message);
       case 'pair':
         return;
       case 'batch.submit':
