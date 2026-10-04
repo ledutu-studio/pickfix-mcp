@@ -1,12 +1,37 @@
 {
   "name": "pickfix-mcp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Local MCP server that receives UI feedback from the PickFix browser extension and hands it to your coding agent.",
-  "keywords": ["mcp", "claude-code", "frontend", "feedback", "browser-extension"],
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "claude-code",
+    "frontend",
+    "feedback",
+    "browser-extension"
+  ],
+  "author": "ledutu <ledutu.it@gmail.com>",
+  "homepage": "https://github.com/ledutu-studio/pickfix-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ledutu-studio/pickfix-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ledutu-studio/pickfix-mcp/issues"
+  },
   "type": "module",
-  "bin": { "pickfix-mcp": "plugin/dist/server.mjs" },
-  "files": ["plugin/dist", "README.md"],
-  "engines": { "node": ">=20" },
+  "bin": {
+    "pickfix-mcp": "plugin/dist/server.mjs"
+  },
+  "files": [
+    "plugin/dist",
+    "README.md",
+    "PRIVACY.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "build": "node scripts/bundle.mjs",
