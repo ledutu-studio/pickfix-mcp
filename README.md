@@ -1,15 +1,32 @@
 # pickfix-mcp
 
+[![npm](https://img.shields.io/npm/v/pickfix-mcp)](https://www.npmjs.com/package/pickfix-mcp)
+[![license](https://img.shields.io/npm/l/pickfix-mcp)](LICENSE)
+
 The local half of **PickFix**. The PickFix browser extension lets developers, QA and PMs pick an element on a running web app, say what is wrong (or rewrite the text in place, comment on the page, record the steps to a bug) and press **Send to Claude**. `pickfix-mcp` receives that feedback on your machine and hands it to the coding agent working on the repository, which fixes it and reports back to the extension.
 
-## Install in Claude Code
-
 ```text
-/plugin marketplace add <this repository's git URL>
-/plugin install pickfix@pickfix
+Chrome: PickFix extension ──WebSocket, 127.0.0.1──▶ pickfix-mcp ──MCP──▶ Claude Code
+   pick · comment · send          (pairing token)        queue        fixes the code
+   ◀──────────────── Queued → Claude is fixing → Done, with a summary ─────────────────
 ```
 
-Restart Claude Code in your project. The plugin starts one `pickfix-mcp` server per session.
+[Tiếng Việt](#tiếng-việt) · [Privacy](PRIVACY.md)
+
+## Quick start
+
+1. **Install the extension:** [PickFix on the Chrome Web Store](https://chromewebstore.google.com/detail/eehanlcaccamfaalnfcikkdneffjkife) (in review; the link works once it is published).
+2. **Install the plugin in Claude Code**, in your project:
+
+   ```text
+   /plugin marketplace add ledutu-studio/pickfix-mcp
+   /plugin install pickfix@pickfix
+   ```
+
+   Restart Claude Code. The plugin starts one `pickfix-mcp` server per session.
+3. **Pair once per machine:** run `/pickfix:pair` in Claude Code, open the PickFix panel on a local page in Chrome, and type the 6-digit code within 2 minutes.
+
+Then pick an element, write what should change and press **Send to Claude**. Requires Node.js 20 or newer.
 
 ### Let Claude start fixing as soon as feedback arrives (optional)
 
@@ -23,16 +40,31 @@ Claude Code shows a warning first; choose **I am using this for local developmen
 
 Without the flag everything still works: run `/pickfix:fix` when the extension shows **Queued**. A hook also reminds Claude of waiting feedback when you send a prompt.
 
-## Pair the extension (once per machine)
+## Pairing
 
-1. In Claude Code, run `/pickfix:pair` (or `npx pickfix-mcp pair` in a terminal).
-2. Open the PickFix panel in Chrome and type the 6-digit code within 2 minutes.
+Every session on the machine shares one pairing. You can also pair from a terminal with `npx pickfix-mcp pair`. To revoke it: `npx pickfix-mcp pair --rotate`, then pair again.
 
-Every session on the machine shares the pairing. To revoke it: `npx pickfix-mcp pair --rotate`, then pair again.
+## Other agents (Cursor, Codex, Claude Desktop, …)
 
-## Other agents (Cursor, Codex, …)
+Run the server with `npx -y pickfix-mcp` as a stdio MCP server. For clients that use an `mcpServers` JSON file (Cursor's `.cursor/mcp.json`, Claude Desktop):
 
-Add a stdio MCP server that runs `npx -y pickfix-mcp`. To pair from a terminal, run `npx pickfix-mcp pair`. These clients have no channel push: ask the agent to use the `fix` prompt, or to call `pickfix_list_batches` and follow the tool descriptions.
+```json
+{
+  "mcpServers": {
+    "pickfix": { "command": "npx", "args": ["-y", "pickfix-mcp"] }
+  }
+}
+```
+
+Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.pickfix]
+command = "npx"
+args = ["-y", "pickfix-mcp"]
+```
+
+Start the client from your project folder: the server queues feedback per repository. These clients have no channel push: ask the agent to use the `fix` prompt, or to call `pickfix_list_batches` and follow the tool descriptions.
 
 ## What the agent gets
 
@@ -91,6 +123,25 @@ pnpm --filter @pickfix/protocol build   # build the protocol package the extensi
 `PICKFIX_EXTENSION_IDS=<id>[,<id>]` allows extra extension ids, for unpacked builds made without the PickFix key.
 
 The extension's id is its Chrome Web Store item id, `eehanlcaccamfaalnfcikkdneffjkife`. `EXTENSION_PUBLIC_KEY` in `@pickfix/protocol` is that item's public key (Developer Dashboard → Package → View public key); Google holds the private key, so nothing secret lives on a developer machine.
+
+## Tiếng Việt
+
+PickFix giúp dev frontend, QA và PM chỉ vào chỗ sai trên giao diện đang chạy, ghi cần sửa gì, rồi gửi thẳng cho Claude Code sửa trong source. `pickfix-mcp` là phần chạy trên máy bạn: nhận feedback từ extension qua `127.0.0.1` và chuyển cho Claude.
+
+1. **Cài extension:** [PickFix trên Chrome Web Store](https://chromewebstore.google.com/detail/eehanlcaccamfaalnfcikkdneffjkife) (đang chờ duyệt).
+2. **Cài plugin trong Claude Code**, ngay trong project của bạn:
+
+   ```text
+   /plugin marketplace add ledutu-studio/pickfix-mcp
+   /plugin install pickfix@pickfix
+   ```
+
+   Khởi động lại Claude Code.
+3. **Ghép nối một lần cho mỗi máy:** chạy `/pickfix:pair`, mở panel PickFix trên trang localhost và nhập mã 6 số trong vòng 2 phút.
+
+Muốn Claude tự sửa ngay khi nhận feedback, mở Claude bằng `claude --dangerously-load-development-channels plugin:pickfix@pickfix`. Không dùng cờ này thì gõ `/pickfix:fix` khi panel hiện **Đang chờ**. Giao diện extension có tiếng Việt và tiếng Anh, đổi trong phần cài đặt của extension.
+
+Cursor, Codex và các agent khác: thêm MCP server chạy `npx -y pickfix-mcp` (xem cấu hình ở trên). Chính sách quyền riêng tư: [PRIVACY.md](PRIVACY.md).
 
 ## License
 
