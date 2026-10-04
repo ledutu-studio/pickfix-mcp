@@ -41615,7 +41615,7 @@ function registerTools(server, getDeps) {
 }
 
 // src/version.ts
-var SERVER_VERSION = "1.0.0";
+var SERVER_VERSION = "1.0.1";
 
 // src/server.ts
 function runPairCli(args) {
