@@ -1,0 +1,122 @@
+name: publish
+
+# Manual only: a release is a person's decision. Do not add push, tag or schedule triggers.
+#
+# Bumps the version (package.json, plugin.json, src/version.ts), runs the checks, rebuilds
+# plugin/dist, publishes to npm, then commits the bump and tags it. npm accepts the upload through
+# trusted publishing (OIDC), so there is no npm token to store. One-time setup on npmjs.com:
+# pickfix-mcp → Settings → Trusted publisher → GitHub Actions, ledutu-studio/pickfix-mcp, publish.yml.
+# Optional secret: DISCORD_WEBHOOK_URL, to hear about the result.
+#
+# Claude Code plugin users do not wait for this: the marketplace reads plugin/ from main directly.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # The branch picker beside the input would otherwise publish another branch and then
+      # fast-forward main onto it in the commit step.
+      - name: Only release from main
+        run: |
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Releases run from main only, not from ${GITHUB_REF_NAME}." >&2
+            exit 1
+          fi
+
+      # `type: choice` only shapes the web form; an API call can send anything.
+      - name: Check the input
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          case "$BUMP" in patch|minor|major) ;; *) echo "bump must be patch, minor or major, got \"$BUMP\"" >&2; exit 1 ;; esac
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Pinned by commit SHA: this job can publish to npm, and `v4` is a mutable tag.
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm compile
+      - run: pnpm test
+      - run: pnpm test:e2e
+
+      # The bundle embeds the version, so it is rebuilt after the bump; the unit tests then check
+      # that every version is in step and that plugin/dist matches the sources.
+      - name: Bump the version and rebuild
+        id: pack
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          VERSION=$(node scripts/bump-version.mjs "$BUMP")
+          pnpm build
+          pnpm test
+          if npm view "pickfix-mcp@${VERSION}" version > /dev/null 2>&1; then
+            echo "npm already has pickfix-mcp ${VERSION}." >&2; exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # Publishing runs before the commit: if npm refuses, main never claims a version npm does not
+      # have. Trusted publishing needs npm 11.5.1 or newer, which also adds provenance.
+      - name: Publish to npm
+        id: upload
+        run: npx -y npm@^11.5.1 publish --access public
+
+      # `[skip ci]` keeps the bump commit from starting ci.yml. One atomic push, so main never gets
+      # the release commit without its tag.
+      - name: Commit and tag
+        env:
+          VERSION: ${{ steps.pack.outputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json plugin/.claude-plugin/plugin.json src/version.ts plugin/dist
+          git commit -m "chore(release): ${VERSION} [skip ci]"
+          git tag "v${VERSION}"
+          git push --atomic origin HEAD:main "refs/tags/v${VERSION}"
+
+      - name: Summary
+        if: always()
+        env:
+          VERSION: ${{ steps.pack.outputs.version }}
+          UPLOAD: ${{ steps.upload.outcome }}
+          JOB: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ "$JOB" = "success" ]; then
+            MESSAGE="pickfix-mcp ${VERSION} is on npm: https://www.npmjs.com/package/pickfix-mcp/v/${VERSION}"
+          elif [ "$UPLOAD" = "success" ]; then
+            MESSAGE="npm already has pickfix-mcp ${VERSION}; only the commit or tag afterwards failed. Do not re-run, which would publish yet another version: commit and tag ${VERSION} by hand."
+          else
+            MESSAGE="pickfix-mcp release failed before npm received anything. Fix the cause and run it again."
+          fi
+          printf '## pickfix-mcp %s → npm\n%s\n' "${VERSION:-?}" "$MESSAGE" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+            jq -n --arg content "${MESSAGE} (${RUN_URL})" '{content: $content}' \
+              | curl -fsS -H 'Content-Type: application/json' -d @- "$DISCORD_WEBHOOK_URL" > /dev/null \
+              || echo "::warning::Could not post to Discord."
+          fi

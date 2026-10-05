@@ -116,6 +116,14 @@ pnpm --filter @pickfix/protocol build   # build the protocol package the extensi
 
 The extension's id is its Chrome Web Store item id, `eehanlcaccamfaalnfcikkdneffjkife`. `EXTENSION_PUBLIC_KEY` in `@pickfix/protocol` is that item's public key (Developer Dashboard → Package → View public key); Google holds the private key, so nothing secret lives on a developer machine.
 
+## Release
+
+- `.github/workflows/ci.yml` runs on every push to `main` and every pull request: type-check, unit tests (which also check that `plugin/dist` is fresh) and the end-to-end tests.
+- `.github/workflows/publish.yml` runs only when started by hand (Actions → publish → Run workflow) from `main`. It bumps the version (`patch` by default, or `minor`/`major`) in `package.json`, `plugin/.claude-plugin/plugin.json` and `src/version.ts`, runs the checks, rebuilds `plugin/dist`, publishes to npm, then commits `chore(release): <version>` and tags `v<version>`. Do not change the version by hand.
+- npm accepts the upload through [trusted publishing](https://docs.npmjs.com/trusted-publishers), so no npm token is stored. One-time setup on npmjs.com: `pickfix-mcp` → Settings → Trusted publisher → GitHub Actions, repository `ledutu-studio/pickfix-mcp`, workflow `publish.yml`.
+- Optional secret `DISCORD_WEBHOOK_URL` posts the result to Discord.
+- Claude Code plugin users do not wait for npm: the marketplace reads `plugin/` from `main`.
+
 ## Tiếng Việt
 
 PickFix giúp dev frontend, QA và PM chỉ vào chỗ sai trên giao diện đang chạy, ghi cần sửa gì, rồi gửi thẳng cho Claude Code sửa trong source. `pickfix-mcp` là phần chạy trên máy bạn: nhận feedback từ extension qua `127.0.0.1` và chuyển cho Claude.
