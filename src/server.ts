@@ -7,36 +7,16 @@ import { startBridge, type Bridge } from './bridge.js';
 import { announce } from './channel.js';
 import { pickfixHome } from './home.js';
 import { log } from './log.js';
-import { createPairingCode, redeemPairingCode } from './pairing.js';
 import { SERVER_INSTRUCTIONS, registerPrompts } from './prompts.js';
 import { QueueStore } from './queue-store.js';
 import { resolveRepoRoot } from './repo.js';
-import { loadToken, readToken, rotateToken } from './token.js';
 import { registerTools, type ToolDeps } from './tools.js';
 import { SERVER_VERSION } from './version.js';
 import { allowedOrigins } from './ws-guard.js';
 
-function runPairCli(args: string[]): void {
-  const home = pickfixHome();
-  if (args.includes('--rotate')) {
-    rotateToken(home);
-    console.log('The pairing token was replaced. Every paired browser must pair again: run `/pickfix:pair` in Claude Code, or `pickfix-mcp pair`.');
-    return;
-  }
-  loadToken(home);
-  const { code } = createPairingCode(home);
-  console.log(`PickFix pairing code: ${code.slice(0, 3)} ${code.slice(3)}`);
-  console.log('Open the PickFix panel in Chrome and enter it within 2 minutes. A session running pickfix-mcp must be open.');
-}
-
-async function runServer(): Promise<void> {
+export async function main(): Promise<void> {
   const home = pickfixHome();
   let linkProblem: string | undefined;
-  try {
-    loadToken(home);
-  } catch (error) {
-    linkProblem = `Cannot create the pairing token in ${home}: ${(error as Error).message}`;
-  }
 
   const mcp = new McpServer(
     { name: 'pickfix', version: SERVER_VERSION },
@@ -77,21 +57,17 @@ async function runServer(): Promise<void> {
     store.prune();
     store.recover();
 
-    if (!linkProblem) {
-      try {
-        bridge = await startBridge({
-          session,
-          serverVersion: SERVER_VERSION,
-          store,
-          origins: allowedOrigins(),
-          readToken: () => readToken(home),
-          redeemPairing: (code) => redeemPairingCode(home, code),
-          onBatchAdded: (record) => void announce(mcp.server, record),
-        });
-        if (!bridge) linkProblem = `All ports ${PORT_FIRST}–${PORT_LAST} are in use by other sessions. Close one of them and restart this session.`;
-      } catch (error) {
-        linkProblem = `Could not start the extension link: ${(error as Error).message}`;
-      }
+    try {
+      bridge = await startBridge({
+        session,
+        serverVersion: SERVER_VERSION,
+        store,
+        origins: allowedOrigins(),
+        onBatchAdded: (record) => void announce(mcp.server, record),
+      });
+      if (!bridge) linkProblem = `All ports ${PORT_FIRST}–${PORT_LAST} are in use by other sessions. Close one of them and restart this session.`;
+    } catch (error) {
+      linkProblem = `Could not start the extension link: ${(error as Error).message}`;
     }
     log(linkProblem ?? `Listening on ws://127.0.0.1:${bridge?.port}/pickfix for ${repoRoot}`);
 
@@ -100,8 +76,6 @@ async function runServer(): Promise<void> {
       session,
       repoRoot,
       linkStatus: () => ({ port: bridge?.port ?? null, reason: linkProblem }),
-      tokenExists: () => readToken(home) !== null,
-      createPairingCode: () => createPairingCode(home),
       onStatusChanged: (batchId) => bridge?.pushStatus(batchId),
     });
 
@@ -136,11 +110,6 @@ async function runServer(): Promise<void> {
   process.on('SIGINT', shutdown);
 
   await mcp.connect(new StdioServerTransport());
-}
-
-export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
-  if (argv[0] === 'pair') return runPairCli(argv.slice(1));
-  await runServer();
 }
 
 main().catch((error) => {

@@ -10,12 +10,10 @@ import { freePorts } from './net-helpers.js';
 import { connect, rejectedStatus, type TestClient } from './ws-client.js';
 
 const session: Session = { sessionId: 'session-a', name: 'shop', cwd: '/Users/dev/shop', startedAt: '2026-10-02T10:00:00Z', agent: 'claude-code', pid: process.pid };
-const hello = (token: string) => ({ v: 1, type: 'hello', protocol: 1, token, client: { extensionVersion: '0.1.0', browser: 'test' } });
+const hello = () => ({ v: 1, type: 'hello', protocol: 2, client: { extensionVersion: '0.1.0', browser: 'test' } });
 
 let bridge: Bridge;
 let store: QueueStore;
-let token: string | null;
-let pairing: 'ok' | 'invalid' | 'expired' | 'none';
 let added: BatchRecord[];
 let home: string;
 let repoRoot: string;
@@ -28,8 +26,6 @@ async function start(overrides: { preAuthMs?: number } = {}) {
       serverVersion: '0.1.0',
       store,
       origins: allowedOrigins({}),
-      readToken: () => token,
-      redeemPairing: () => pairing,
       onBatchAdded: (record) => added.push(record),
       log: () => {},
       watchIntervalMs: 50,
@@ -41,8 +37,8 @@ async function start(overrides: { preAuthMs?: number } = {}) {
 
 async function authed(): Promise<TestClient> {
   const client = await connect(bridge.port);
-  expect(await client.next()).toMatchObject({ type: 'server.info', app: 'pickfix', protocol: 1 });
-  client.send(hello('t'.repeat(64)));
+  expect(await client.next()).toMatchObject({ type: 'server.info', app: 'pickfix', protocol: 2 });
+  client.send(hello());
   expect(await client.next()).toEqual({ v: 1, type: 'welcome', session });
   return client;
 }
@@ -51,8 +47,6 @@ beforeEach(async () => {
   home = tempHome();
   repoRoot = tempDir();
   store = new QueueStore({ home, repoRoot, log: () => {} });
-  token = 't'.repeat(64);
-  pairing = 'none';
   added = [];
   await start();
 });
@@ -90,21 +84,7 @@ describe('connection guard resilience', () => {
   });
 });
 
-describe('authentication', () => {
-  it('closes after 20 failed pairing attempts, even for the right token', async () => {
-    pairing = 'invalid';
-    const first = await connect(bridge.port);
-    await first.next();
-    for (let i = 0; i < 20; i++) {
-      first.send({ v: 1, type: 'pair', code: '000000' });
-      expect(await first.next()).toMatchObject({ type: 'error', code: 'pairing-failed' });
-    }
-    const second = await connect(bridge.port);
-    await second.next();
-    second.send(hello('t'.repeat(64)));
-    expect(await second.closed).toBe(1008);
-  });
-
+describe('handshake', () => {
   it('closes on invalid, too-large and rpc frames before authentication', async () => {
     const bad = await connect(bridge.port);
     await bad.next();
@@ -122,40 +102,30 @@ describe('authentication', () => {
     expect(await rpc.closed).toBe(1008);
   });
 
-  it('checks the token again on a repeated hello', async () => {
+  it('welcomes a hello from the extension without any pairing', async () => {
+    await authed();
+  });
+
+  it('answers a repeated hello with welcome again', async () => {
     const client = await authed();
-    token = 'n'.repeat(64);
-    client.send(hello('t'.repeat(64)));
-    expect(await client.next()).toMatchObject({ type: 'error', code: 'unauthorized' });
-    expect(await client.closed).toBe(1008);
+    client.send(hello());
+    expect(await client.next()).toEqual({ v: 1, type: 'welcome', session });
   });
 
-  it('welcomes the right token', async () => {
-    await authed();
-  });
-
-  it('refuses a wrong token and closes', async () => {
+  it('tells a protocol 1 extension (which still sends a pairing token) to update', async () => {
     const client = await connect(bridge.port);
     await client.next();
-    client.send(hello('x'.repeat(64)));
-    expect(await client.next()).toMatchObject({ type: 'error', code: 'unauthorized' });
-    expect(await client.closed).toBe(1008);
-  });
-
-  it('reads the token on every hello, so a rotated token locks out the old one', async () => {
-    await authed();
-    token = 'n'.repeat(64);
-    const client = await connect(bridge.port);
-    await client.next();
-    client.send(hello('t'.repeat(64)));
-    expect(await client.next()).toMatchObject({ type: 'error', code: 'unauthorized' });
-  });
-
-  it('refuses another protocol version', async () => {
-    const client = await connect(bridge.port);
-    await client.next();
-    client.send({ ...hello('t'.repeat(64)), protocol: 2 });
+    client.send({ ...hello(), protocol: 1, token: 't'.repeat(64) });
     expect(await client.next()).toMatchObject({ type: 'error', code: 'protocol-mismatch' });
+    expect(await client.closed).toBe(1008);
+  });
+
+  it('no longer understands pairing messages', async () => {
+    const client = await connect(bridge.port);
+    await client.next();
+    client.send({ v: 1, type: 'pair', code: '123456' });
+    expect(await client.next()).toMatchObject({ type: 'error', code: 'invalid' });
+    expect(await client.closed).toBe(1008);
   });
 
   it('refuses batch messages before hello', async () => {
@@ -165,29 +135,11 @@ describe('authentication', () => {
     expect(await client.next()).toMatchObject({ type: 'error', code: 'unauthorized' });
   });
 
-  it('closes a connection that never authenticates', async () => {
+  it('closes a connection that never says hello', async () => {
     await bridge.close();
     await start({ preAuthMs: 100 });
     const client = await connect(bridge.port);
     expect(await client.closed).toBe(1008);
-  });
-
-  it('hands out the token for a valid pairing code', async () => {
-    pairing = 'ok';
-    const client = await connect(bridge.port);
-    await client.next();
-    client.send({ v: 1, type: 'pair', code: '123456' });
-    expect(await client.next()).toEqual({ v: 1, type: 'paired', token: 't'.repeat(64) });
-    client.send(hello('t'.repeat(64)));
-    expect(await client.next()).toMatchObject({ type: 'welcome' });
-  });
-
-  it('explains a failed pairing code', async () => {
-    pairing = 'expired';
-    const client = await connect(bridge.port);
-    await client.next();
-    client.send({ v: 1, type: 'pair', code: '123456' });
-    expect(await client.next()).toMatchObject({ type: 'error', code: 'pairing-failed', message: expect.stringContaining('expired') });
   });
 });
 

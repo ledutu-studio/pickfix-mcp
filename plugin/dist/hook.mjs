@@ -19859,7 +19859,6 @@ var errorCodeSchema = external_exports.enum([
   "rate-limited",
   "not-found",
   "conflict",
-  "pairing-failed",
   "internal"
 ]);
 var clientMessageSchema = external_exports.discriminatedUnion("type", [
@@ -19867,10 +19866,8 @@ var clientMessageSchema = external_exports.discriminatedUnion("type", [
     v,
     type: external_exports.literal("hello"),
     protocol: external_exports.number().int(),
-    token: external_exports.string().min(1).max(200),
     client: external_exports.object({ extensionVersion: external_exports.string().max(50), browser: external_exports.string().max(200) })
   }),
-  external_exports.object({ v, type: external_exports.literal("pair"), code: external_exports.string().regex(/^\d{6}$/) }),
   external_exports.object({ v, type: external_exports.literal("batch.submit"), requestId: idSchema, batch: batchSchema }),
   external_exports.object({ v, type: external_exports.literal("batch.watch"), batchIds: external_exports.array(idSchema).max(500) }),
   external_exports.object({ v, type: external_exports.literal("batch.cancel"), requestId: idSchema, batchId: idSchema }),
@@ -19879,7 +19876,6 @@ var clientMessageSchema = external_exports.discriminatedUnion("type", [
 var serverMessageSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ v, type: external_exports.literal("server.info"), app: external_exports.literal(APP_ID), protocol: external_exports.number().int(), serverVersion: external_exports.string().max(50) }),
   external_exports.object({ v, type: external_exports.literal("welcome"), session: sessionSchema }),
-  external_exports.object({ v, type: external_exports.literal("paired"), token: external_exports.string().min(1).max(200) }),
   external_exports.object({ v, type: external_exports.literal("batch.accepted"), requestId: idSchema, batchId: idSchema, status: batchStatusSchema }),
   external_exports.object({
     v,

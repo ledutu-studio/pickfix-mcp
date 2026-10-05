@@ -7,7 +7,7 @@ The local half of **PickFix**. The PickFix browser extension lets developers, QA
 
 ```text
 Chrome: PickFix extension ──WebSocket, 127.0.0.1──▶ pickfix-mcp ──MCP──▶ Claude Code
-   pick · comment · send          (pairing token)        queue        fixes the code
+   pick · comment · send        (extension origin only)   queue        fixes the code
    ◀──────────────── Queued → Claude is fixing → Done, with a summary ─────────────────
 ```
 
@@ -24,7 +24,7 @@ Chrome: PickFix extension ──WebSocket, 127.0.0.1──▶ pickfix-mcp ──
    ```
 
    Restart Claude Code. The plugin starts one `pickfix-mcp` server per session.
-3. **Pair once per machine:** run `/pickfix:pair` in Claude Code, open the PickFix panel on a local page in Chrome, and type the 6-digit code within 2 minutes.
+3. **Open the PickFix panel** on a local page in Chrome. It finds every running session by itself; there is nothing to pair.
 
 Then pick an element, write what should change and press **Send to Claude**. Requires Node.js 20 or newer.
 
@@ -39,10 +39,6 @@ claude --dangerously-load-development-channels plugin:pickfix@pickfix
 Claude Code shows a warning first; choose **I am using this for local development**. A shell alias helps: `alias claudefix='claude --dangerously-load-development-channels plugin:pickfix@pickfix'`.
 
 Without the flag everything still works: run `/pickfix:fix` when the extension shows **Queued**. A hook also reminds Claude of waiting feedback when you send a prompt.
-
-## Pairing
-
-Every session on the machine shares one pairing. You can also pair from a terminal with `npx pickfix-mcp pair`. To revoke it: `npx pickfix-mcp pair --rotate`, then pair again.
 
 ## Other agents (Cursor, Codex, Claude Desktop, …)
 
@@ -70,20 +66,18 @@ Start the client from your project folder: the server queues feedback per reposi
 
 | Tool | Purpose |
 |---|---|
-| `pickfix_status` | Session, repository, port, pairing state, batch counts |
+| `pickfix_status` | Session, repository, port, batch counts |
 | `pickfix_list_batches` | Queued and working batches (or by status) |
 | `pickfix_claim_batch` | Claims a batch and returns its items as markdown plus screenshots |
 | `pickfix_report` | Reports `done` / `partial` / `failed` with a summary and per-item results |
 | `pickfix_import` | Queues a JSON file exported from the extension |
-| `pickfix_pair_code` | A pairing code for the extension |
 
 A batch can be claimed by one session only, so two Claude windows on the same repository never fix the same feedback twice.
 
 ## Security model
 
 - The server listens on `127.0.0.1` only, on the first free port of 47400–47409, path `/pickfix`.
-- A connection must come from the PickFix extension (`Origin: chrome-extension://<PickFix id>`) to a loopback `Host`; web pages and DNS-rebinding hosts are refused at the handshake.
-- The extension must present the machine's pairing token, kept in `~/.pickfix/token` (mode 0600).
+- A connection must come from the PickFix extension (`Origin: chrome-extension://<PickFix id>`) to a loopback `Host`; web pages, other extensions and DNS-rebinding hosts are refused at the handshake. Browsers do not let a page set `Origin`, so this is the gate; there is no pairing step. Programs already running under your account can still connect, as they can to any local port.
 - Everything captured from a web page is passed to the agent as fenced, untrusted data with an instruction never to follow it.
 - The server has no tool that runs commands or writes files in your repository; code changes go through your agent's normal permissions.
 
@@ -93,8 +87,6 @@ Full privacy policy (English and Vietnamese): [PRIVACY.md](PRIVACY.md).
 
 ```text
 ~/.pickfix/                 0700
-  token                     pairing token, 0600
-  pairing.json              the current pairing code, 0600
   queue/<repo-key>/<batch>/ batch.json, state.json, screenshots
 ```
 
@@ -102,12 +94,12 @@ Finished batches are deleted after 7 days. Set `PICKFIX_HOME` to use another dir
 
 ## Protocol
 
-The extension and server speak protocol 1 over WebSocket; the full contract is section 5 of `docs/specs/2026-10-02-pickfix-mcp-design.md`, and its types and schemas ship as `@pickfix/protocol` (`packages/protocol`).
+The extension and server speak protocol 2 over WebSocket; the full contract is section 5 of `docs/specs/2026-10-02-pickfix-mcp-design.md`, and its types and schemas ship as `@pickfix/protocol` (`packages/protocol`).
 
 | Direction | Messages |
 |---|---|
-| Server → extension | `server.info`, `welcome`, `paired`, `batch.accepted`, `batch.status`, `pong`, `error` |
-| Extension → server | `hello`, `pair`, `batch.submit`, `batch.watch`, `batch.cancel`, `ping` |
+| Server → extension | `server.info`, `welcome`, `batch.accepted`, `batch.status`, `pong`, `error` |
+| Extension → server | `hello`, `batch.submit`, `batch.watch`, `batch.cancel`, `ping` |
 
 ## Development
 
@@ -137,7 +129,7 @@ PickFix giúp dev frontend, QA và PM chỉ vào chỗ sai trên giao diện đa
    ```
 
    Khởi động lại Claude Code.
-3. **Ghép nối một lần cho mỗi máy:** chạy `/pickfix:pair`, mở panel PickFix trên trang localhost và nhập mã 6 số trong vòng 2 phút.
+3. **Mở panel PickFix** trên trang localhost. Panel tự tìm các session đang chạy, không cần ghép nối.
 
 Muốn Claude tự sửa ngay khi nhận feedback, mở Claude bằng `claude --dangerously-load-development-channels plugin:pickfix@pickfix`. Không dùng cờ này thì gõ `/pickfix:fix` khi panel hiện **Đang chờ**. Giao diện extension có tiếng Việt và tiếng Anh, đổi trong phần cài đặt của extension.
 

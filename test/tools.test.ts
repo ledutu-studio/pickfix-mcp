@@ -20,8 +20,6 @@ function makeDeps(sessionId: string, home: string, repoRoot: string): ToolDeps {
     session,
     repoRoot,
     linkStatus: () => ({ port: 47400 }),
-    tokenExists: () => true,
-    createPairingCode: () => ({ code: '481273', expiresAt: Date.now() + 120_000 }),
     onStatusChanged: (id) => changed.push(id),
   };
 }
@@ -45,7 +43,7 @@ const call = (name: string, args: Record<string, unknown> = {}) => mcp.client.ca
 it('lists the six tools', async () => {
   const { tools } = await mcp.client.listTools();
   expect(tools.map((t) => t.name).sort()).toEqual(
-    ['pickfix_claim_batch', 'pickfix_import', 'pickfix_list_batches', 'pickfix_pair_code', 'pickfix_report', 'pickfix_status'].sort(),
+    ['pickfix_claim_batch', 'pickfix_import', 'pickfix_list_batches', 'pickfix_report', 'pickfix_status'].sort(),
   );
 });
 
@@ -194,18 +192,6 @@ describe('pickfix_import', () => {
     const result = (await call('pickfix_import', { path: file })) as { isError?: boolean };
     expect(result.isError).toBe(true);
     expect(text(result)).toContain('not a PickFix batch');
-  });
-});
-
-describe('pickfix_pair_code', () => {
-  it('returns a readable code', async () => {
-    expect(text(await call('pickfix_pair_code'))).toContain('481 273');
-  });
-
-  it('is an error when the extension link is down', async () => {
-    deps.linkStatus = () => ({ port: null, reason: 'All ports are in use.' });
-    const result = (await call('pickfix_pair_code')) as { isError?: boolean };
-    expect(result.isError).toBe(true);
   });
 });
 

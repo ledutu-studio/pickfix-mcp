@@ -14,8 +14,6 @@ export type ToolDeps = {
   session: Session;
   repoRoot: string;
   linkStatus: () => { port: number | null; reason?: string };
-  tokenExists: () => boolean;
-  createPairingCode: () => { code: string; expiresAt: number };
   onStatusChanged: (batchId: string) => void;
 };
 
@@ -84,7 +82,7 @@ export function registerTools(server: McpServer, getDeps: () => Promise<ToolDeps
     'pickfix_status',
     {
       title: 'PickFix status',
-      description: 'Show this session\'s PickFix link: repository, WebSocket port (or why there is none), whether the extension can pair, and how many feedback batches are in each state.',
+      description: 'Show this session\'s PickFix link: repository, WebSocket port (or why there is none), and how many feedback batches are in each state.',
       annotations: { readOnlyHint: true },
     },
     async () => {
@@ -98,7 +96,6 @@ export function registerTools(server: McpServer, getDeps: () => Promise<ToolDeps
           `PickFix session for ${deps.session.name} (${deps.repoRoot})`,
           `Agent: ${deps.session.agent} · session ${deps.session.sessionId}`,
           link.port ? `Extension link: listening on ws://127.0.0.1:${link.port}/pickfix` : `Extension link: not available. ${link.reason ?? ''}`.trim(),
-          `Pairing token: ${deps.tokenExists() ? 'present' : 'missing'}`,
           `Batches: ${countText}`,
         ].join('\n'),
       );
@@ -215,21 +212,6 @@ export function registerTools(server: McpServer, getDeps: () => Promise<ToolDeps
       const { record, created } = deps.store.add(parsed.data, deps.session.sessionId);
       if (!created) return ok(`Batch ${record.batch.id} is already in the queue (status: ${record.state.status}).`);
       return ok(`Imported batch ${record.batch.id} with ${plural(record.batch.items.length, 'item')}. Claim it with pickfix_claim_batch.`);
-    },
-  );
-
-  server.registerTool(
-    'pickfix_pair_code',
-    {
-      title: 'Create a PickFix pairing code',
-      description: 'Create a 6-digit code, valid for 2 minutes, that the user enters in the PickFix extension panel to pair it with this machine. Never reveals the token.',
-    },
-    async () => {
-      const deps = await getDeps();
-      const link = deps.linkStatus();
-      if (!link.port) return error(`The extension link is not available, so pairing cannot work. ${link.reason ?? ''}`.trim());
-      const { code } = deps.createPairingCode();
-      return ok(`Pairing code: ${code.slice(0, 3)} ${code.slice(3)} (valid for 2 minutes). Ask the user to open the PickFix panel in Chrome and enter this code.`);
     },
   );
 }

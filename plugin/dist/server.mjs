@@ -9446,7 +9446,7 @@ var require_websocket = __commonJS({
     var http = __require("http");
     var net = __require("net");
     var tls = __require("tls");
-    var { randomBytes: randomBytes4, createHash: createHash2 } = __require("crypto");
+    var { randomBytes: randomBytes3, createHash: createHash2 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -9997,7 +9997,7 @@ var require_websocket = __commonJS({
         }
       }
       const defaultPort = isSecure ? 443 : 80;
-      const key = randomBytes4(16).toString("base64");
+      const key = randomBytes3(16).toString("base64");
       const request = isSecure ? https.request : http.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
@@ -40173,7 +40173,7 @@ var StdioServerTransport = class {
 };
 
 // packages/protocol/src/constants.ts
-var PROTOCOL_VERSION = 1;
+var PROTOCOL_VERSION = 2;
 var APP_ID = "pickfix";
 var PORT_FIRST = 47400;
 var PORT_LAST = 47409;
@@ -40351,7 +40351,6 @@ var errorCodeSchema = external_exports.enum([
   "rate-limited",
   "not-found",
   "conflict",
-  "pairing-failed",
   "internal"
 ]);
 var clientMessageSchema = external_exports.discriminatedUnion("type", [
@@ -40359,10 +40358,8 @@ var clientMessageSchema = external_exports.discriminatedUnion("type", [
     v,
     type: external_exports.literal("hello"),
     protocol: external_exports.number().int(),
-    token: external_exports.string().min(1).max(200),
     client: external_exports.object({ extensionVersion: external_exports.string().max(50), browser: external_exports.string().max(200) })
   }),
-  external_exports.object({ v, type: external_exports.literal("pair"), code: external_exports.string().regex(/^\d{6}$/) }),
   external_exports.object({ v, type: external_exports.literal("batch.submit"), requestId: idSchema, batch: batchSchema }),
   external_exports.object({ v, type: external_exports.literal("batch.watch"), batchIds: external_exports.array(idSchema).max(500) }),
   external_exports.object({ v, type: external_exports.literal("batch.cancel"), requestId: idSchema, batchId: idSchema }),
@@ -40371,7 +40368,6 @@ var clientMessageSchema = external_exports.discriminatedUnion("type", [
 var serverMessageSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ v, type: external_exports.literal("server.info"), app: external_exports.literal(APP_ID), protocol: external_exports.number().int(), serverVersion: external_exports.string().max(50) }),
   external_exports.object({ v, type: external_exports.literal("welcome"), session: sessionSchema }),
-  external_exports.object({ v, type: external_exports.literal("paired"), token: external_exports.string().min(1).max(200) }),
   external_exports.object({ v, type: external_exports.literal("batch.accepted"), requestId: idSchema, batchId: idSchema, status: batchStatusSchema }),
   external_exports.object({
     v,
@@ -40565,59 +40561,6 @@ async function listenOnFirstFree(create, ports, host = "127.0.0.1") {
   return null;
 }
 
-// src/token.ts
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync as chmodSync2, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join as join2 } from "node:path";
-
-// src/home.ts
-import { chmodSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-function pickfixHome(env = process.env) {
-  return env.PICKFIX_HOME ?? join(homedir(), ".pickfix");
-}
-function ensureHome(home) {
-  mkdirSync(home, { recursive: true, mode: 448 });
-  chmodSync(home, 448);
-}
-
-// src/token.ts
-var TOKEN = /^[0-9a-f]{64}$/;
-function tokenPath(home) {
-  return join2(home, "token");
-}
-function readToken(home) {
-  try {
-    const value = readFileSync(tokenPath(home), "utf8").trim();
-    return TOKEN.test(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
-function writeNewToken(home) {
-  ensureHome(home);
-  const token = randomBytes(32).toString("hex");
-  const tmp = `${tokenPath(home)}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${token}
-`, { mode: 384 });
-  chmodSync2(tmp, 384);
-  renameSync(tmp, tokenPath(home));
-  return token;
-}
-function loadToken(home) {
-  ensureHome(home);
-  return readToken(home) ?? writeNewToken(home);
-}
-function rotateToken(home) {
-  return writeNewToken(home);
-}
-function tokensEqual(a, b) {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
 // src/ws-guard.ts
 function allowedOrigins(env = process.env) {
   const extra = (env.PICKFIX_EXTENSION_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean);
@@ -40663,11 +40606,6 @@ function stateKey(state) {
   return `${state.status}|${state.history.length}|${state.updatedAt}`;
 }
 var TERMINAL = /* @__PURE__ */ new Set(["done", "partial", "failed", "cancelled"]);
-var PAIRING_MESSAGES = {
-  invalid: "That pairing code is not valid. Run /pickfix:pair in Claude Code to get a new one.",
-  expired: "That pairing code has expired. Run /pickfix:pair in Claude Code again.",
-  none: "No pairing code is active. Run /pickfix:pair in Claude Code first."
-};
 function statusMessage(batchId, state) {
   return {
     v: 1,
@@ -40697,7 +40635,6 @@ async function startBridge(deps, ports = PORTS) {
   server.on("error", (error63) => log2(`Bridge server error: ${error63.message}`));
   const wss = new import_websocket_server.default({ noServer: true, maxPayload: MAX_MESSAGE_BYTES + 1024 * 1024 });
   const connections = /* @__PURE__ */ new Set();
-  const failures = new WindowCounter(20, 6e4);
   server.on("upgrade", (req, socket, head) => {
     socket.on("error", (error63) => log2(`Upgrade socket error: ${error63.message}`));
     const check2 = checkUpgrade(req, port, deps.origins);
@@ -40731,7 +40668,7 @@ Content-Length: 0\r
       submits: new WindowCounter(20, 6e4),
       watched: /* @__PURE__ */ new Map(),
       timer: setTimeout(() => {
-        if (!conn.authed) ws.close(1008, "Authentication timeout");
+        if (!conn.authed) ws.close(1008, "Handshake timeout");
       }, deps.preAuthMs ?? 1e4)
     };
     connections.add(conn);
@@ -40766,16 +40703,13 @@ Content-Length: 0\r
     if (message.type === "ping") return send(conn, { v: 1, type: "pong" });
     if (!conn.authed) {
       if (message.type === "hello") return onHello(conn, message);
-      if (message.type === "pair") return onPair(conn, message);
-      fail(conn, "unauthorized", "Send hello with the pairing token first.");
+      fail(conn, "unauthorized", "Send hello first.");
       conn.ws.close(1008, "Not authenticated");
       return;
     }
     switch (message.type) {
       case "hello":
         return onHello(conn, message);
-      case "pair":
-        return;
       case "batch.submit":
         return onSubmit(conn, message);
       case "batch.watch":
@@ -40787,34 +40721,14 @@ Content-Length: 0\r
     }
   }
   function onHello(conn, message) {
-    if (failures.exceeded()) return void conn.ws.close(1008, "Too many failed attempts");
     if (message.protocol !== PROTOCOL_VERSION) {
       fail(conn, "protocol-mismatch", `This server speaks protocol ${PROTOCOL_VERSION} and the extension speaks protocol ${message.protocol}. Update PickFix and pickfix-mcp.`);
       conn.ws.close(1008, "Protocol mismatch");
       return;
     }
-    const token = deps.readToken();
-    if (!token || !tokensEqual(token, message.token)) {
-      failures.record();
-      fail(conn, "unauthorized", "The pairing token is missing or wrong. Pair the extension again with /pickfix:pair.");
-      conn.ws.close(1008, "Unauthorized");
-      return;
-    }
     conn.authed = true;
     clearTimeout(conn.timer);
     send(conn, { v: 1, type: "welcome", session: deps.session });
-  }
-  function onPair(conn, message) {
-    if (failures.exceeded()) return void conn.ws.close(1008, "Too many failed attempts");
-    const result = deps.redeemPairing(message.code);
-    if (result !== "ok") {
-      failures.record();
-      fail(conn, "pairing-failed", PAIRING_MESSAGES[result]);
-      return;
-    }
-    const token = deps.readToken();
-    if (!token) return fail(conn, "internal", "The server has no pairing token. Restart the Claude Code session.");
-    send(conn, { v: 1, type: "paired", token });
   }
   function onSubmit(conn, message) {
     if (conn.submits.exceeded()) {
@@ -40897,55 +40811,16 @@ async function announce(server, record2, log2 = log) {
   }
 }
 
-// src/pairing.ts
-import { randomInt } from "node:crypto";
-import { chmodSync as chmodSync3, readFileSync as readFileSync2, renameSync as renameSync2, rmSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { join as join3 } from "node:path";
-var PAIRING_TTL_MS = 12e4;
-var MAX_PAIRING_ATTEMPTS = 5;
-function pairingPath(home) {
-  return join3(home, "pairing.json");
+// src/home.ts
+import { chmodSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+function pickfixHome(env = process.env) {
+  return env.PICKFIX_HOME ?? join(homedir(), ".pickfix");
 }
-function write(home, data) {
-  ensureHome(home);
-  const tmp = `${pairingPath(home)}.${process.pid}.tmp`;
-  writeFileSync2(tmp, JSON.stringify(data), { mode: 384 });
-  chmodSync3(tmp, 384);
-  renameSync2(tmp, pairingPath(home));
-}
-function read(home) {
-  try {
-    const data = JSON.parse(readFileSync2(pairingPath(home), "utf8"));
-    if (typeof data.code !== "string" || typeof data.expiresAt !== "number" || typeof data.attempts !== "number") return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-function remove(home) {
-  rmSync(pairingPath(home), { force: true });
-}
-function createPairingCode(home, now = Date.now()) {
-  const code = randomInt(0, 1e6).toString().padStart(6, "0");
-  const expiresAt = now + PAIRING_TTL_MS;
-  write(home, { code, expiresAt, attempts: 0 });
-  return { code, expiresAt };
-}
-function redeemPairingCode(home, code, now = Date.now()) {
-  const current = read(home);
-  if (!current) return "none";
-  if (now > current.expiresAt) {
-    remove(home);
-    return "expired";
-  }
-  if (tokensEqual(current.code, code)) {
-    remove(home);
-    return "ok";
-  }
-  const attempts = current.attempts + 1;
-  if (attempts >= MAX_PAIRING_ATTEMPTS) remove(home);
-  else write(home, { ...current, attempts });
-  return "invalid";
+function ensureHome(home) {
+  mkdirSync(home, { recursive: true, mode: 448 });
+  chmodSync(home, 448);
 }
 
 // src/prompts.ts
@@ -40992,17 +40867,17 @@ function registerPrompts(server) {
 }
 
 // src/queue-store.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
-import { existsSync, mkdirSync as mkdirSync2, readFileSync as readFileSync4, readdirSync, renameSync as renameSync4, statSync, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
-import { join as join4 } from "node:path";
+import { randomBytes as randomBytes2 } from "node:crypto";
+import { existsSync, mkdirSync as mkdirSync2, readFileSync as readFileSync2, readdirSync, renameSync as renameSync2, statSync, rmSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join2 } from "node:path";
 
 // src/fs-json.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
-import { readFileSync as readFileSync3, renameSync as renameSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 function readJson(file2, log2 = log) {
   let text;
   try {
-    text = readFileSync3(file2, "utf8");
+    text = readFileSync(file2, "utf8");
   } catch (error63) {
     if (error63.code === "ENOENT") return void 0;
     log2(`Could not read ${file2}: ${error63.message}`);
@@ -41013,7 +40888,7 @@ function readJson(file2, log2 = log) {
   } catch {
     const quarantined = `${file2}.corrupt-${Date.now()}`;
     try {
-      renameSync3(file2, quarantined);
+      renameSync(file2, quarantined);
     } catch {
     }
     log2(`Moved a corrupt file aside: ${quarantined}`);
@@ -41021,10 +40896,10 @@ function readJson(file2, log2 = log) {
   }
 }
 function writeJson(file2, data) {
-  const tmp = `${file2}.${process.pid}.${randomBytes2(4).toString("hex")}.tmp`;
-  writeFileSync3(tmp, `${JSON.stringify(data, null, 2)}
+  const tmp = `${file2}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}
 `, { mode: 384 });
-  renameSync3(tmp, file2);
+  renameSync(tmp, file2);
 }
 
 // src/repo.ts
@@ -41072,7 +40947,7 @@ function isProcessAlive(pid) {
 var QueueStore = class {
   constructor(opts) {
     this.opts = opts;
-    this.dir = join4(opts.home, "queue", repoKey(opts.repoRoot));
+    this.dir = join2(opts.home, "queue", repoKey(opts.repoRoot));
     this.now = opts.now ?? (() => /* @__PURE__ */ new Date());
     this.log = opts.log ?? log;
   }
@@ -41082,24 +40957,24 @@ var QueueStore = class {
   log;
   batchDir(batchId) {
     if (!ID_PATTERN.test(batchId)) throw new Error(`Invalid batch id "${batchId}".`);
-    return join4(this.dir, batchId);
+    return join2(this.dir, batchId);
   }
   ensureDir() {
     ensureHome(this.opts.home);
     mkdirSync2(this.dir, { recursive: true, mode: 448 });
-    const repoFile = join4(this.dir, "repo.json");
+    const repoFile = join2(this.dir, "repo.json");
     if (!existsSync(repoFile)) writeJson(repoFile, { cwd: this.opts.repoRoot });
   }
   writeState(batchId, state) {
-    writeJson(join4(this.batchDir(batchId), "state.json"), state);
+    writeJson(join2(this.batchDir(batchId), "state.json"), state);
   }
   readState(batchId) {
     if (!ID_PATTERN.test(batchId)) return void 0;
-    return readJson(join4(this.dir, batchId, "state.json"), this.log);
+    return readJson(join2(this.dir, batchId, "state.json"), this.log);
   }
   get(batchId) {
     if (!ID_PATTERN.test(batchId)) return void 0;
-    const batch = readJson(join4(this.dir, batchId, "batch.json"), this.log);
+    const batch = readJson(join2(this.dir, batchId, "batch.json"), this.log);
     const state = this.readState(batchId);
     if (batch && state) {
       try {
@@ -41132,7 +41007,7 @@ var QueueStore = class {
     if (existing) return { record: existing, created: false };
     this.ensureDir();
     const at = this.now().toISOString();
-    const tmp = join4(this.dir, `.tmp-${batch.id}-${process.pid}-${randomBytes3(4).toString("hex")}`);
+    const tmp = join2(this.dir, `.tmp-${batch.id}-${process.pid}-${randomBytes2(4).toString("hex")}`);
     let stored;
     let state;
     try {
@@ -41141,38 +41016,38 @@ var QueueStore = class {
         if (!item.screenshot) return item;
         const { data, ...meta3 } = item.screenshot;
         const file2 = `${item.id}.${meta3.mime === "image/png" ? "png" : "jpg"}`;
-        writeFileSync4(join4(tmp, file2), Buffer.from(data, "base64"), { mode: 384 });
+        writeFileSync2(join2(tmp, file2), Buffer.from(data, "base64"), { mode: 384 });
         return { ...item, screenshot: { ...meta3, file: file2 } };
       });
       stored = { ...batch, items };
       state = { status: "queued", receivedAt: at, updatedAt: at, history: [{ status: "queued", at, sessionId }] };
-      writeJson(join4(tmp, "batch.json"), stored);
-      writeJson(join4(tmp, "state.json"), state);
+      writeJson(join2(tmp, "batch.json"), stored);
+      writeJson(join2(tmp, "state.json"), state);
     } catch (error63) {
-      rmSync2(tmp, { recursive: true, force: true });
+      rmSync(tmp, { recursive: true, force: true });
       throw error63;
     }
     try {
-      renameSync4(tmp, this.batchDir(batch.id));
+      renameSync2(tmp, this.batchDir(batch.id));
     } catch (error63) {
       const errCode = error63.code;
       if ((errCode === "ENOTEMPTY" || errCode === "EEXIST") && !this.get(batch.id)) {
-        const quarantined = join4(this.dir, `.corrupt-${batch.id}-${Date.now()}`);
+        const quarantined = join2(this.dir, `.corrupt-${batch.id}-${Date.now()}`);
         try {
-          renameSync4(this.batchDir(batch.id), quarantined);
+          renameSync2(this.batchDir(batch.id), quarantined);
           this.log(`Quarantined existing batch directory: ${quarantined}`);
         } catch {
-          rmSync2(tmp, { recursive: true, force: true });
+          rmSync(tmp, { recursive: true, force: true });
           throw new Error(`Could not store batch ${batch.id}.`, { cause: error63 });
         }
         try {
-          renameSync4(tmp, this.batchDir(batch.id));
+          renameSync2(tmp, this.batchDir(batch.id));
         } catch (retryError) {
-          rmSync2(tmp, { recursive: true, force: true });
+          rmSync(tmp, { recursive: true, force: true });
           throw new Error(`Could not store batch ${batch.id}.`, { cause: retryError });
         }
       } else {
-        rmSync2(tmp, { recursive: true, force: true });
+        rmSync(tmp, { recursive: true, force: true });
         if (errCode === "ENOTEMPTY" || errCode === "EEXIST") {
           const raced = this.get(batch.id);
           if (raced) return { record: raced, created: false };
@@ -41208,15 +41083,15 @@ var QueueStore = class {
   }
   screenshotPath(batchId, item) {
     if (!item.screenshot) return void 0;
-    const path = join4(this.batchDir(batchId), item.screenshot.file);
+    const path = join2(this.batchDir(batchId), item.screenshot.file);
     return existsSync(path) ? path : void 0;
   }
   screenshotBase64(batchId, item) {
     const path = this.screenshotPath(batchId, item);
-    return path ? readFileSync4(path).toString("base64") : void 0;
+    return path ? readFileSync2(path).toString("base64") : void 0;
   }
   claimDir(batchId) {
-    return join4(this.batchDir(batchId), "claim");
+    return join2(this.batchDir(batchId), "claim");
   }
   /** mkdir is atomic: whoever creates claim/ owns the batch, for a claim or a cancel. */
   takeClaim(batchId, owner) {
@@ -41227,9 +41102,9 @@ var QueueStore = class {
       throw error63;
     }
     try {
-      writeJson(join4(this.claimDir(batchId), "owner.json"), owner);
+      writeJson(join2(this.claimDir(batchId), "owner.json"), owner);
     } catch (error63) {
-      rmSync2(this.claimDir(batchId), { recursive: true, force: true });
+      rmSync(this.claimDir(batchId), { recursive: true, force: true });
       throw error63;
     }
     return true;
@@ -41243,7 +41118,7 @@ var QueueStore = class {
   }
   owner(batchId) {
     if (!ID_PATTERN.test(batchId)) return void 0;
-    return readJson(join4(this.dir, batchId, "claim", "owner.json"), this.log);
+    return readJson(join2(this.dir, batchId, "claim", "owner.json"), this.log);
   }
   claim(sessionId, pid, batchId) {
     if (batchId !== void 0) return this.claimOne(sessionId, pid, batchId, true);
@@ -41270,16 +41145,16 @@ var QueueStore = class {
       const state = this.transition(batchId, record2.state, "working", sessionId);
       return { ok: true, record: { batch: record2.batch, state } };
     } catch (error63) {
-      rmSync2(this.claimDir(batchId), { recursive: true, force: true });
+      rmSync(this.claimDir(batchId), { recursive: true, force: true });
       throw error63;
     }
   }
   /** Writes the full claim markdown next to the batch, for claims too large to return inline. */
   writeBatchMarkdown(batchId, markdown) {
-    const file2 = join4(this.batchDir(batchId), "batch.md");
-    const tmp = `${file2}.${process.pid}.${randomBytes3(4).toString("hex")}.tmp`;
-    writeFileSync4(tmp, markdown, { mode: 384 });
-    renameSync4(tmp, file2);
+    const file2 = join2(this.batchDir(batchId), "batch.md");
+    const tmp = `${file2}.${process.pid}.${randomBytes2(4).toString("hex")}.tmp`;
+    writeFileSync2(tmp, markdown, { mode: 384 });
+    renameSync2(tmp, file2);
     return file2;
   }
   report(sessionId, batchId, report) {
@@ -41301,15 +41176,15 @@ var QueueStore = class {
     try {
       return { ok: true, state: this.transition(batchId, state, "cancelled", sessionId) };
     } catch (error63) {
-      rmSync2(this.claimDir(batchId), { recursive: true, force: true });
+      rmSync(this.claimDir(batchId), { recursive: true, force: true });
       throw error63;
     }
   }
   /** Atomically takes a claim dir away from whoever owns it; false if someone else got there first. */
   seizeClaim(batchId) {
-    const dead = `${this.claimDir(batchId)}.dead-${randomBytes3(4).toString("hex")}`;
+    const dead = `${this.claimDir(batchId)}.dead-${randomBytes2(4).toString("hex")}`;
     try {
-      renameSync4(this.claimDir(batchId), dead);
+      renameSync2(this.claimDir(batchId), dead);
     } catch {
       return void 0;
     }
@@ -41335,7 +41210,7 @@ var QueueStore = class {
         if (!stale) continue;
         const dead2 = this.seizeClaim(id);
         if (!dead2) continue;
-        rmSync2(dead2, { recursive: true, force: true });
+        rmSync(dead2, { recursive: true, force: true });
         this.log(`Batch ${id} had a stale claim; it is free again.`);
         continue;
       }
@@ -41349,7 +41224,7 @@ var QueueStore = class {
           recovered.push(id);
         }
       } finally {
-        rmSync2(dead, { recursive: true, force: true });
+        rmSync(dead, { recursive: true, force: true });
       }
     }
     return recovered;
@@ -41359,7 +41234,7 @@ var QueueStore = class {
     const pruned = [];
     for (const summary of this.list(["done", "partial", "failed", "cancelled"])) {
       if (Date.parse(summary.updatedAt) < cutoff) {
-        rmSync2(this.batchDir(summary.id), { recursive: true, force: true });
+        rmSync(this.batchDir(summary.id), { recursive: true, force: true });
         pruned.push(summary.id);
       }
     }
@@ -41368,7 +41243,7 @@ var QueueStore = class {
 };
 
 // src/tools.ts
-import { readFileSync as readFileSync5 } from "node:fs";
+import { readFileSync as readFileSync3 } from "node:fs";
 import { isAbsolute as isAbsolute2, resolve as resolve3 } from "node:path";
 
 // src/source-paths.ts
@@ -41476,7 +41351,7 @@ function registerTools(server, getDeps) {
     "pickfix_status",
     {
       title: "PickFix status",
-      description: "Show this session's PickFix link: repository, WebSocket port (or why there is none), whether the extension can pair, and how many feedback batches are in each state.",
+      description: "Show this session's PickFix link: repository, WebSocket port (or why there is none), and how many feedback batches are in each state.",
       annotations: { readOnlyHint: true }
     },
     async () => {
@@ -41490,7 +41365,6 @@ function registerTools(server, getDeps) {
           `PickFix session for ${deps.session.name} (${deps.repoRoot})`,
           `Agent: ${deps.session.agent} \xB7 session ${deps.session.sessionId}`,
           link.port ? `Extension link: listening on ws://127.0.0.1:${link.port}/pickfix` : `Extension link: not available. ${link.reason ?? ""}`.trim(),
-          `Pairing token: ${deps.tokenExists() ? "present" : "missing"}`,
           `Batches: ${countText}`
         ].join("\n")
       );
@@ -41587,7 +41461,7 @@ function registerTools(server, getDeps) {
       const file2 = isAbsolute2(path) ? path : resolve3(deps.repoRoot, path);
       let data;
       try {
-        data = JSON.parse(readFileSync5(file2, "utf8"));
+        data = JSON.parse(readFileSync3(file2, "utf8"));
       } catch (e) {
         return error62(`Could not read ${file2}: ${e.message}`);
       }
@@ -41598,46 +41472,15 @@ function registerTools(server, getDeps) {
       return ok(`Imported batch ${record2.batch.id} with ${plural3(record2.batch.items.length, "item")}. Claim it with pickfix_claim_batch.`);
     }
   );
-  server.registerTool(
-    "pickfix_pair_code",
-    {
-      title: "Create a PickFix pairing code",
-      description: "Create a 6-digit code, valid for 2 minutes, that the user enters in the PickFix extension panel to pair it with this machine. Never reveals the token."
-    },
-    async () => {
-      const deps = await getDeps();
-      const link = deps.linkStatus();
-      if (!link.port) return error62(`The extension link is not available, so pairing cannot work. ${link.reason ?? ""}`.trim());
-      const { code } = deps.createPairingCode();
-      return ok(`Pairing code: ${code.slice(0, 3)} ${code.slice(3)} (valid for 2 minutes). Ask the user to open the PickFix panel in Chrome and enter this code.`);
-    }
-  );
 }
 
 // src/version.ts
 var SERVER_VERSION = "1.0.1";
 
 // src/server.ts
-function runPairCli(args) {
-  const home = pickfixHome();
-  if (args.includes("--rotate")) {
-    rotateToken(home);
-    console.log("The pairing token was replaced. Every paired browser must pair again: run `/pickfix:pair` in Claude Code, or `pickfix-mcp pair`.");
-    return;
-  }
-  loadToken(home);
-  const { code } = createPairingCode(home);
-  console.log(`PickFix pairing code: ${code.slice(0, 3)} ${code.slice(3)}`);
-  console.log("Open the PickFix panel in Chrome and enter it within 2 minutes. A session running pickfix-mcp must be open.");
-}
-async function runServer() {
+async function main() {
   const home = pickfixHome();
   let linkProblem;
-  try {
-    loadToken(home);
-  } catch (error63) {
-    linkProblem = `Cannot create the pairing token in ${home}: ${error63.message}`;
-  }
   const mcp = new McpServer(
     { name: "pickfix", version: SERVER_VERSION },
     { capabilities: { experimental: { "claude/channel": {} } }, instructions: SERVER_INSTRUCTIONS }
@@ -41674,21 +41517,17 @@ async function runServer() {
     const store = new QueueStore({ home, repoRoot });
     store.prune();
     store.recover();
-    if (!linkProblem) {
-      try {
-        bridge = await startBridge({
-          session,
-          serverVersion: SERVER_VERSION,
-          store,
-          origins: allowedOrigins(),
-          readToken: () => readToken(home),
-          redeemPairing: (code) => redeemPairingCode(home, code),
-          onBatchAdded: (record2) => void announce(mcp.server, record2)
-        });
-        if (!bridge) linkProblem = `All ports ${PORT_FIRST}\u2013${PORT_LAST} are in use by other sessions. Close one of them and restart this session.`;
-      } catch (error63) {
-        linkProblem = `Could not start the extension link: ${error63.message}`;
-      }
+    try {
+      bridge = await startBridge({
+        session,
+        serverVersion: SERVER_VERSION,
+        store,
+        origins: allowedOrigins(),
+        onBatchAdded: (record2) => void announce(mcp.server, record2)
+      });
+      if (!bridge) linkProblem = `All ports ${PORT_FIRST}\u2013${PORT_LAST} are in use by other sessions. Close one of them and restart this session.`;
+    } catch (error63) {
+      linkProblem = `Could not start the extension link: ${error63.message}`;
     }
     log(linkProblem ?? `Listening on ws://127.0.0.1:${bridge?.port}/pickfix for ${repoRoot}`);
     resolveDeps({
@@ -41696,8 +41535,6 @@ async function runServer() {
       session,
       repoRoot,
       linkStatus: () => ({ port: bridge?.port ?? null, reason: linkProblem }),
-      tokenExists: () => readToken(home) !== null,
-      createPairingCode: () => createPairingCode(home),
       onStatusChanged: (batchId) => bridge?.pushStatus(batchId)
     });
     const announceIds = async (ids) => {
@@ -41729,10 +41566,6 @@ async function runServer() {
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
   await mcp.connect(new StdioServerTransport());
-}
-async function main(argv = process.argv.slice(2)) {
-  if (argv[0] === "pair") return runPairCli(argv.slice(1));
-  await runServer();
 }
 main().catch((error63) => {
   log(`Fatal: ${error63.stack ?? String(error63)}`);

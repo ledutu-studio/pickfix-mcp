@@ -72,24 +72,20 @@ async function until<T>(read: () => T | undefined, ms = 5000): Promise<T> {
   }
 }
 
-async function pairedExtension(agent: Agent) {
-  const code = /(\d{3}) (\d{3})/.exec(textOf(await agent.client.callTool({ name: 'pickfix_pair_code', arguments: {} })))!;
+async function connectedExtension(agent: Agent) {
   const ext = await connect(agent.port, { origin: ORIGIN });
-  expect(await ext.next()).toMatchObject({ type: 'server.info', app: 'pickfix' });
-  ext.send({ v: 1, type: 'pair', code: `${code[1]}${code[2]}` });
-  const paired = await ext.next();
-  if (paired.type !== 'paired') throw new Error(`Pairing failed: ${JSON.stringify(paired)}`);
-  ext.send({ v: 1, type: 'hello', protocol: 1, token: paired.token, client: { extensionVersion: '0.1.0', browser: 'e2e' } });
+  expect(await ext.next()).toMatchObject({ type: 'server.info', app: 'pickfix', protocol: 2 });
+  ext.send({ v: 1, type: 'hello', protocol: 2, client: { extensionVersion: '0.1.0', browser: 'e2e' } });
   expect(await ext.next()).toMatchObject({ type: 'welcome', session: { agent: 'e2e-agent' } });
   return ext;
 }
 
 describe('pickfix-mcp end to end', () => {
-  it('pairs, receives a batch, announces it, and streams claim and report back', async () => {
+  it('connects, receives a batch, announces it, and streams claim and report back', async () => {
     const home = tempHome();
     const repo = realpathSync(tempDir());
     const agent = await startAgent(home, repo);
-    const ext = await pairedExtension(agent);
+    const ext = await connectedExtension(agent);
 
     ext.send({ v: 1, type: 'batch.submit', requestId: 'r1', batch: makeBatch() });
     expect(await ext.next()).toMatchObject({ type: 'batch.accepted', batchId: 'batch-1', status: 'queued' });
@@ -115,20 +111,20 @@ describe('pickfix-mcp end to end', () => {
     });
   });
 
-  it('refuses a web page origin and a wrong token', async () => {
+  it('refuses a web page origin and tells an old extension to update', async () => {
     const agent = await startAgent(tempHome(), realpathSync(tempDir()));
     expect(await rejectedStatus(agent.port, { origin: 'http://evil.test' })).toBe(403);
     const ext = await connect(agent.port, { origin: ORIGIN });
     await ext.next();
     ext.send({ v: 1, type: 'hello', protocol: 1, token: 'f'.repeat(64), client: { extensionVersion: '0.1.0', browser: 'e2e' } });
-    expect(await ext.next()).toMatchObject({ type: 'error', code: 'unauthorized' });
+    expect(await ext.next()).toMatchObject({ type: 'error', code: 'protocol-mismatch' });
   });
 
   it('a second session on the same repo takes the next port and shares the queue', async () => {
     const home = tempHome();
     const repo = realpathSync(tempDir());
     const first = await startAgent(home, repo);
-    const ext = await pairedExtension(first);
+    const ext = await connectedExtension(first);
     ext.send({ v: 1, type: 'batch.submit', requestId: 'r1', batch: makeBatch() });
     await ext.next();
     const second = await startAgent(home, repo);
@@ -140,7 +136,7 @@ describe('pickfix-mcp end to end', () => {
     const home = tempHome();
     const repo = realpathSync(tempDir());
     const first = await startAgent(home, repo);
-    const ext = await pairedExtension(first);
+    const ext = await connectedExtension(first);
     ext.send({ v: 1, type: 'batch.submit', requestId: 'r1', batch: makeBatch() });
     await ext.next();
     const claimed = await first.client.callTool({ name: 'pickfix_claim_batch', arguments: {} });

@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const APP_ID = 'pickfix';
 
 export const PORT_FIRST = 47400;

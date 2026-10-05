@@ -15,7 +15,6 @@ import {
 import { log as defaultLog } from './log.js';
 import { listenOnFirstFree } from './port-binder.js';
 import type { BatchRecord, BatchState, QueueStore } from './queue-store.js';
-import { tokensEqual } from './token.js';
 import { WindowCounter, checkUpgrade } from './ws-guard.js';
 
 export type BridgeDeps = {
@@ -23,8 +22,6 @@ export type BridgeDeps = {
   serverVersion: string;
   store: QueueStore;
   origins: Set<string>;
-  readToken: () => string | null;
-  redeemPairing: (code: string) => 'ok' | 'invalid' | 'expired' | 'none';
   onBatchAdded: (record: BatchRecord) => void;
   log?: (message: string) => void;
   preAuthMs?: number;
@@ -48,12 +45,6 @@ function stateKey(state: BatchState): string {
 }
 
 const TERMINAL = new Set<string>(['done', 'partial', 'failed', 'cancelled']);
-
-const PAIRING_MESSAGES = {
-  invalid: 'That pairing code is not valid. Run /pickfix:pair in Claude Code to get a new one.',
-  expired: 'That pairing code has expired. Run /pickfix:pair in Claude Code again.',
-  none: 'No pairing code is active. Run /pickfix:pair in Claude Code first.',
-} as const;
 
 export function statusMessage(batchId: string, state: BatchState): ServerMessage {
   return {
@@ -89,11 +80,11 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
   // Headroom above the limit so an oversized message gets a polite `too-large` instead of a dropped socket.
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES + 1024 * 1024 });
   const connections = new Set<Connection>();
-  const failures = new WindowCounter(20, 60_000);
 
   server.on('upgrade', (req, socket, head) => {
     // Node removes its own error listener before 'upgrade'; a reset must not become an unhandled error.
     socket.on('error', (error) => log(`Upgrade socket error: ${error.message}`));
+    // The Origin check is the whole gate: only the PickFix extension can open a socket from a browser.
     const check = checkUpgrade(req, port, deps.origins);
     if (!check.ok) {
       socket.end(`HTTP/1.1 ${check.status} ${check.status === 403 ? 'Forbidden' : 'Not Found'}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
@@ -126,7 +117,7 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
       submits: new WindowCounter(20, 60_000),
       watched: new Map(),
       timer: setTimeout(() => {
-        if (!conn.authed) ws.close(1008, 'Authentication timeout');
+        if (!conn.authed) ws.close(1008, 'Handshake timeout');
       }, deps.preAuthMs ?? 10_000),
     };
     connections.add(conn);
@@ -162,16 +153,13 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
     if (message.type === 'ping') return send(conn, { v: 1, type: 'pong' });
     if (!conn.authed) {
       if (message.type === 'hello') return onHello(conn, message);
-      if (message.type === 'pair') return onPair(conn, message);
-      fail(conn, 'unauthorized', 'Send hello with the pairing token first.');
+      fail(conn, 'unauthorized', 'Send hello first.');
       conn.ws.close(1008, 'Not authenticated');
       return;
     }
     switch (message.type) {
       case 'hello':
         return onHello(conn, message);
-      case 'pair':
-        return;
       case 'batch.submit':
         return onSubmit(conn, message);
       case 'batch.watch':
@@ -184,35 +172,14 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
   }
 
   function onHello(conn: Connection, message: Extract<ClientMessage, { type: 'hello' }>): void {
-    if (failures.exceeded()) return void conn.ws.close(1008, 'Too many failed attempts');
     if (message.protocol !== PROTOCOL_VERSION) {
       fail(conn, 'protocol-mismatch', `This server speaks protocol ${PROTOCOL_VERSION} and the extension speaks protocol ${message.protocol}. Update PickFix and pickfix-mcp.`);
       conn.ws.close(1008, 'Protocol mismatch');
       return;
     }
-    const token = deps.readToken();
-    if (!token || !tokensEqual(token, message.token)) {
-      failures.record();
-      fail(conn, 'unauthorized', 'The pairing token is missing or wrong. Pair the extension again with /pickfix:pair.');
-      conn.ws.close(1008, 'Unauthorized');
-      return;
-    }
     conn.authed = true;
     clearTimeout(conn.timer);
     send(conn, { v: 1, type: 'welcome', session: deps.session });
-  }
-
-  function onPair(conn: Connection, message: Extract<ClientMessage, { type: 'pair' }>): void {
-    if (failures.exceeded()) return void conn.ws.close(1008, 'Too many failed attempts');
-    const result = deps.redeemPairing(message.code);
-    if (result !== 'ok') {
-      failures.record();
-      fail(conn, 'pairing-failed', PAIRING_MESSAGES[result]);
-      return;
-    }
-    const token = deps.readToken();
-    if (!token) return fail(conn, 'internal', 'The server has no pairing token. Restart the Claude Code session.');
-    send(conn, { v: 1, type: 'paired', token });
   }
 
   function onSubmit(conn: Connection, message: Extract<ClientMessage, { type: 'batch.submit' }>): void {

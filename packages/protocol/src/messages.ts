@@ -13,7 +13,6 @@ export const errorCodeSchema = z.enum([
   'rate-limited',
   'not-found',
   'conflict',
-  'pairing-failed',
   'internal',
 ]);
 
@@ -22,10 +21,8 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     v,
     type: z.literal('hello'),
     protocol: z.number().int(),
-    token: z.string().min(1).max(200),
     client: z.object({ extensionVersion: z.string().max(50), browser: z.string().max(200) }),
   }),
-  z.object({ v, type: z.literal('pair'), code: z.string().regex(/^\d{6}$/) }),
   z.object({ v, type: z.literal('batch.submit'), requestId: idSchema, batch: batchSchema }),
   z.object({ v, type: z.literal('batch.watch'), batchIds: z.array(idSchema).max(500) }),
   z.object({ v, type: z.literal('batch.cancel'), requestId: idSchema, batchId: idSchema }),
@@ -35,7 +32,6 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
 export const serverMessageSchema = z.discriminatedUnion('type', [
   z.object({ v, type: z.literal('server.info'), app: z.literal(APP_ID), protocol: z.number().int(), serverVersion: z.string().max(50) }),
   z.object({ v, type: z.literal('welcome'), session: sessionSchema }),
-  z.object({ v, type: z.literal('paired'), token: z.string().min(1).max(200) }),
   z.object({ v, type: z.literal('batch.accepted'), requestId: idSchema, batchId: idSchema, status: batchStatusSchema }),
   z.object({
     v,

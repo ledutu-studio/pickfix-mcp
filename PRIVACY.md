@@ -25,8 +25,8 @@ Values of password fields, payment-card fields, one-time codes and elements mark
 
 ## Where it is stored
 
-- **In the extension:** drafts, settings and the pairing token are kept in your browser's extension storage on your computer. Deleting a draft or removing the extension removes them.
-- **In `pickfix-mcp`:** feedback you send is kept under `~/.pickfix/queue` on your computer until it is handled. Finished feedback is deleted after 7 days. The pairing token is kept in `~/.pickfix/token`, readable only by your user account.
+- **In the extension:** drafts and settings are kept in your browser's extension storage on your computer. Deleting a draft or removing the extension removes them.
+- **In `pickfix-mcp`:** feedback you send is kept under `~/.pickfix/queue` on your computer until it is handled. Finished feedback is deleted after 7 days.
 
 ## Who receives it
 
@@ -40,8 +40,7 @@ The extension asks only for what this needs: storage for drafts and settings, sc
 
 ## Your choices
 
-- Delete any draft from the panel, or remove the pairing token in the extension's settings.
-- Revoke the pairing on your machine by deleting `~/.pickfix/token`. A new token is created the next time `pickfix-mcp` starts, and the extension has to pair again.
+- Delete any draft from the panel.
 - Delete `~/.pickfix` to remove everything the server stored.
 - Remove the extension to delete everything it stored in your browser.
 
@@ -78,8 +77,8 @@ Giá trị của ô mật khẩu, ô thẻ thanh toán, mã dùng một lần v�
 
 ## Lưu ở đâu
 
-- **Trong extension:** bản nháp, cài đặt và token ghép nối nằm trong bộ nhớ extension của trình duyệt trên máy bạn. Xoá bản nháp hoặc gỡ extension sẽ xoá chúng.
-- **Trong `pickfix-mcp`:** feedback bạn gửi được lưu trong `~/.pickfix/queue` trên máy bạn cho tới khi được xử lý. Feedback đã xong bị xoá sau 7 ngày. Token ghép nối nằm trong `~/.pickfix/token`, chỉ tài khoản người dùng của bạn đọc được.
+- **Trong extension:** bản nháp và cài đặt nằm trong bộ nhớ extension của trình duyệt trên máy bạn. Xoá bản nháp hoặc gỡ extension sẽ xoá chúng.
+- **Trong `pickfix-mcp`:** feedback bạn gửi được lưu trong `~/.pickfix/queue` trên máy bạn cho tới khi được xử lý. Feedback đã xong bị xoá sau 7 ngày.
 
 ## Ai nhận dữ liệu
 
@@ -93,8 +92,7 @@ Extension chỉ xin những quyền cần cho việc này: bộ nhớ cho bản 
 
 ## Lựa chọn của bạn
 
-- Xoá bản nháp bất kỳ trong panel, hoặc xoá token ghép nối trong phần cài đặt của extension.
-- Thu hồi ghép nối trên máy bằng cách xoá `~/.pickfix/token`. Lần chạy tiếp theo `pickfix-mcp` sẽ tạo token mới, và extension phải ghép nối lại.
+- Xoá bản nháp bất kỳ trong panel.
 - Xoá thư mục `~/.pickfix` để xoá mọi thứ server đã lưu.
 - Gỡ extension để xoá mọi thứ extension đã lưu trong trình duyệt.
 

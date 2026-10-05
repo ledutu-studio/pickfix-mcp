@@ -4,7 +4,7 @@ import { makeBatch } from './fixtures.js';
 
 describe('parseClientMessage', () => {
   it('parses hello', () => {
-    const text = JSON.stringify({ v: 1, type: 'hello', protocol: 1, token: 'abc', client: { extensionVersion: '0.1.0', browser: 'Chrome 141' } });
+    const text = JSON.stringify({ v: 1, type: 'hello', protocol: 2, client: { extensionVersion: '0.1.0', browser: 'Chrome 141' } });
     const result = parseClientMessage(text);
     expect(result.ok && result.message.type).toBe('hello');
   });
@@ -14,9 +14,8 @@ describe('parseClientMessage', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('accepts only 6-digit pairing codes', () => {
-    expect(parseClientMessage('{"v":1,"type":"pair","code":"123456"}').ok).toBe(true);
-    expect(parseClientMessage('{"v":1,"type":"pair","code":"12345"}').ok).toBe(false);
+  it('no longer knows pairing messages', () => {
+    expect(parseClientMessage('{"v":1,"type":"pair","code":"123456"}').ok).toBe(false);
   });
 
   it('reports invalid JSON', () => {
@@ -53,7 +52,7 @@ describe('parseServerMessage', () => {
   });
 
   it('parses errors', () => {
-    const result = parseServerMessage('{"v":1,"type":"error","code":"unauthorized","message":"Wrong token."}');
+    const result = parseServerMessage('{"v":1,"type":"error","code":"unauthorized","message":"Send hello first."}');
     expect(result.ok && result.message.type === 'error' && result.message.code).toBe('unauthorized');
   });
 });
