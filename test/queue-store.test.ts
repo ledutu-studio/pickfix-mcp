@@ -1,9 +1,9 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { QueueStore } from '../src/queue-store.js';
 import * as fsJson from '../src/fs-json.js';
-import { makeBatch, makeElementItem, PNG_1PX } from '../packages/protocol/test/fixtures.js';
+import { makeAttachment, makeBatch, makeElementItem, makeRegionItem, PNG_1PX } from '../packages/protocol/test/fixtures.js';
 import { tempDir, tempHome } from './helpers.js';
 
 vi.mock('../src/fs-json.js', async (importOriginal) => {
@@ -143,5 +143,42 @@ describe('QueueStore screenshots', () => {
     const item = record.batch.items[0]!;
     expect(store.screenshotBase64('batch-1', item)).toBe(PNG_1PX);
     expect(existsSync(store.screenshotPath('batch-1', item)!)).toBe(true);
+  });
+});
+
+describe('QueueStore reference images', () => {
+  it('writes each attachment as <itemId>-ref-<n> and keeps only metadata in batch.json', () => {
+    const { store } = newStore();
+    const item = { ...makeElementItem(), attachments: [makeAttachment('a.png'), { ...makeAttachment('b.jpg'), mime: 'image/jpeg' as const }] };
+    store.add(makeBatch({ items: [item] }), 's');
+    const dir = join(store.dir, 'batch-1');
+    expect(readFileSync(join(dir, 'item-1-ref-1.png')).toString('base64')).toBe(PNG_1PX);
+    expect(existsSync(join(dir, 'item-1-ref-2.jpg'))).toBe(true);
+    const stored = JSON.parse(readFileSync(join(dir, 'batch.json'), 'utf8'));
+    expect(stored.items[0].attachments).toEqual([
+      { mime: 'image/png', width: 1, height: 1, name: 'a.png', file: 'item-1-ref-1.png' },
+      { mime: 'image/jpeg', width: 1, height: 1, name: 'b.jpg', file: 'item-1-ref-2.jpg' },
+    ]);
+    expect(JSON.stringify(stored)).not.toContain(PNG_1PX);
+  });
+
+  it('returns base64 and a path for a stored attachment, and nothing when the file is gone', () => {
+    const { store } = newStore();
+    const { record } = store.add(makeBatch({ items: [{ ...makeElementItem(), attachments: [makeAttachment()] }] }), 's');
+    const attachment = record.batch.items[0]!.attachments![0]!;
+    expect(store.attachmentBase64('batch-1', attachment)).toBe(PNG_1PX);
+    const path = store.attachmentPath('batch-1', attachment)!;
+    rmSync(path);
+    expect(store.attachmentPath('batch-1', attachment)).toBeUndefined();
+    expect(store.attachmentBase64('batch-1', attachment)).toBeUndefined();
+  });
+
+  it('stores a region item with its area screenshot and no attachments key', () => {
+    const { store } = newStore();
+    const { record } = store.add(makeBatch({ items: [makeRegionItem()] }), 's');
+    const stored = record.batch.items[0]!;
+    expect(stored.screenshot).toMatchObject({ region: 'area', file: 'region-1.png' });
+    expect(stored).not.toHaveProperty('attachments');
+    expect(stored.region?.rect).toEqual({ x: 40, y: 120, width: 600, height: 320 });
   });
 });

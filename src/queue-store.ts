@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ID_PATTERN, type Batch, type BatchReport, type BatchStatus, type Item, type Screenshot } from '@pickfix/protocol';
+import { ID_PATTERN, type Attachment, type Batch, type BatchReport, type BatchStatus, type Item, type Screenshot } from '@pickfix/protocol';
 import { readJson, writeJson } from './fs-json.js';
 import { ensureHome } from './home.js';
 import { log as defaultLog } from './log.js';
@@ -17,7 +17,8 @@ export type BatchState = {
 };
 
 export type StoredScreenshot = Omit<Screenshot, 'data'> & { file: string };
-export type StoredItem = Omit<Item, 'screenshot'> & { screenshot?: StoredScreenshot };
+export type StoredAttachment = Omit<Attachment, 'data'> & { file: string };
+export type StoredItem = Omit<Item, 'screenshot' | 'attachments'> & { screenshot?: StoredScreenshot; attachments?: StoredAttachment[] };
 export type StoredBatch = Omit<Batch, 'items'> & { items: StoredItem[] };
 export type BatchRecord = { batch: StoredBatch; state: BatchState };
 
@@ -68,6 +69,28 @@ export function isProcessAlive(pid: number): boolean {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+
+const extensionFor = (mime: string) => (mime === 'image/png' ? 'png' : 'jpg');
+
+/** Writes an item's screenshot and reference images into `dir` and returns the item with file names instead of data. */
+function storeImages(dir: string, item: Item): StoredItem {
+  const { screenshot, attachments, ...rest } = item;
+  const stored: StoredItem = rest;
+  if (screenshot) {
+    const { data, ...meta } = screenshot;
+    const file = `${item.id}.${extensionFor(meta.mime)}`;
+    writeFileSync(join(dir, file), Buffer.from(data, 'base64'), { mode: 0o600 });
+    stored.screenshot = { ...meta, file };
+  }
+  if (attachments?.length) {
+    stored.attachments = attachments.map(({ data, ...meta }, n) => {
+      const file = `${item.id}-ref-${n + 1}.${extensionFor(meta.mime)}`;
+      writeFileSync(join(dir, file), Buffer.from(data, 'base64'), { mode: 0o600 });
+      return { ...meta, file };
+    });
+  }
+  return stored;
 }
 
 export class QueueStore {
@@ -149,13 +172,7 @@ export class QueueStore {
 
     try {
       mkdirSync(tmp, { mode: 0o700 });
-      const items: StoredItem[] = batch.items.map((item) => {
-        if (!item.screenshot) return item as StoredItem;
-        const { data, ...meta } = item.screenshot;
-        const file = `${item.id}.${meta.mime === 'image/png' ? 'png' : 'jpg'}`;
-        writeFileSync(join(tmp, file), Buffer.from(data, 'base64'), { mode: 0o600 });
-        return { ...item, screenshot: { ...meta, file } };
-      });
+      const items: StoredItem[] = batch.items.map((item) => storeImages(tmp, item));
       stored = { ...batch, items };
       state = { status: 'queued', receivedAt: at, updatedAt: at, history: [{ status: 'queued', at, sessionId }] };
       writeJson(join(tmp, 'batch.json'), stored);
@@ -235,6 +252,16 @@ export class QueueStore {
 
   screenshotBase64(batchId: string, item: StoredItem): string | undefined {
     const path = this.screenshotPath(batchId, item);
+    return path ? readFileSync(path).toString('base64') : undefined;
+  }
+
+  attachmentPath(batchId: string, attachment: StoredAttachment): string | undefined {
+    const path = join(this.batchDir(batchId), attachment.file);
+    return existsSync(path) ? path : undefined;
+  }
+
+  attachmentBase64(batchId: string, attachment: StoredAttachment): string | undefined {
+    const path = this.attachmentPath(batchId, attachment);
     return path ? readFileSync(path).toString('base64') : undefined;
   }
 

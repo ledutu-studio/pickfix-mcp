@@ -40993,6 +40993,25 @@ function isProcessAlive(pid) {
     return error63.code === "EPERM";
   }
 }
+var extensionFor = (mime) => mime === "image/png" ? "png" : "jpg";
+function storeImages(dir, item) {
+  const { screenshot, attachments, ...rest } = item;
+  const stored = rest;
+  if (screenshot) {
+    const { data, ...meta3 } = screenshot;
+    const file2 = `${item.id}.${extensionFor(meta3.mime)}`;
+    writeFileSync2(join2(dir, file2), Buffer.from(data, "base64"), { mode: 384 });
+    stored.screenshot = { ...meta3, file: file2 };
+  }
+  if (attachments?.length) {
+    stored.attachments = attachments.map(({ data, ...meta3 }, n) => {
+      const file2 = `${item.id}-ref-${n + 1}.${extensionFor(meta3.mime)}`;
+      writeFileSync2(join2(dir, file2), Buffer.from(data, "base64"), { mode: 384 });
+      return { ...meta3, file: file2 };
+    });
+  }
+  return stored;
+}
 var QueueStore = class {
   constructor(opts) {
     this.opts = opts;
@@ -41061,13 +41080,7 @@ var QueueStore = class {
     let state;
     try {
       mkdirSync2(tmp, { mode: 448 });
-      const items = batch.items.map((item) => {
-        if (!item.screenshot) return item;
-        const { data, ...meta3 } = item.screenshot;
-        const file2 = `${item.id}.${meta3.mime === "image/png" ? "png" : "jpg"}`;
-        writeFileSync2(join2(tmp, file2), Buffer.from(data, "base64"), { mode: 384 });
-        return { ...item, screenshot: { ...meta3, file: file2 } };
-      });
+      const items = batch.items.map((item) => storeImages(tmp, item));
       stored = { ...batch, items };
       state = { status: "queued", receivedAt: at, updatedAt: at, history: [{ status: "queued", at, sessionId }] };
       writeJson(join2(tmp, "batch.json"), stored);
@@ -41137,6 +41150,14 @@ var QueueStore = class {
   }
   screenshotBase64(batchId, item) {
     const path = this.screenshotPath(batchId, item);
+    return path ? readFileSync2(path).toString("base64") : void 0;
+  }
+  attachmentPath(batchId, attachment) {
+    const path = join2(this.batchDir(batchId), attachment.file);
+    return existsSync(path) ? path : void 0;
+  }
+  attachmentBase64(batchId, attachment) {
+    const path = this.attachmentPath(batchId, attachment);
     return path ? readFileSync2(path).toString("base64") : void 0;
   }
   claimDir(batchId) {
