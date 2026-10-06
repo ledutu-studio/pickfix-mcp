@@ -74,7 +74,7 @@ describe('pickfix_list_batches', () => {
   });
 
   it('says when there is nothing', async () => {
-    expect(text(await call('pickfix_list_batches'))).toContain('No PickFix batches');
+    expect(text(await call('pickfix_list_batches'))).toContain('No Pickfix batches');
   });
 });
 
@@ -83,7 +83,7 @@ describe('pickfix_claim_batch', () => {
     deps.store.add(makeBatch({ items: [{ ...makeElementItem(), anchor: { ...makeElementItem().anchor!, source: { ...makeElementItem().anchor!.source, file: join(deps.repoRoot, 'src/components/CheckoutSummary.tsx') } } }] }), 's');
     const result = (await call('pickfix_claim_batch')) as { content: { type: string; data?: string; mimeType?: string }[] };
     const md = text(result);
-    expect(md).toContain('# PickFix batch batch-1');
+    expect(md).toContain('# Pickfix batch batch-1');
     expect(md).toContain('`src/components/CheckoutSummary.tsx:88:7`');
     expect(md).toContain('**Screenshot:** attached as image 1');
     expect(result.content.find((c) => c.type === 'image')).toMatchObject({ data: PNG_1PX, mimeType: 'image/png' });
@@ -96,13 +96,13 @@ describe('pickfix_claim_batch', () => {
     await call('pickfix_claim_batch', { batchId: 'batch-1' });
     const again = (await call('pickfix_claim_batch', { batchId: 'batch-1' })) as { isError?: boolean };
     expect(again.isError).toBeFalsy();
-    expect(text(again)).toContain('# PickFix batch batch-1');
+    expect(text(again)).toContain('# Pickfix batch batch-1');
   });
 
   it('is an error when nothing is queued', async () => {
     const result = (await call('pickfix_claim_batch')) as { isError?: boolean };
     expect(result.isError).toBe(true);
-    expect(text(result)).toContain('No queued PickFix batches');
+    expect(text(result)).toContain('No queued Pickfix batches');
   });
 
   it('tells the second session that another session has the batch', async () => {
@@ -191,7 +191,7 @@ describe('pickfix_import', () => {
     writeFileSync(file, '{"schema":"other"}');
     const result = (await call('pickfix_import', { path: file })) as { isError?: boolean };
     expect(result.isError).toBe(true);
-    expect(text(result)).toContain('not a PickFix batch');
+    expect(text(result)).toContain('not a Pickfix batch');
   });
 });
 
@@ -208,7 +208,7 @@ it('returns an error naming the cause when start-up failed', async () => {
   const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
   const { registerTools } = await import('../src/tools.js');
   const server = new McpServer({ name: 'pickfix', version: '0.1.0' });
-  registerTools(server, () => Promise.reject(new Error('PickFix could not start: boom')));
+  registerTools(server, () => Promise.reject(new Error('Pickfix could not start: boom')));
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   const client = new Client({ name: 'test', version: '1.0.0' });

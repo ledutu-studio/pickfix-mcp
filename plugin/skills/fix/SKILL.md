@@ -1,9 +1,9 @@
 ---
 name: fix
-description: Fix UI feedback that the PickFix browser extension queued for this repository. Use when the user mentions PickFix feedback, queued UI feedback or a batch id to handle. Do not use for bug reports or UI changes the user describes directly.
+description: Fix UI feedback that the Pickfix browser extension queued for this repository. Use when the user mentions Pickfix feedback, queued UI feedback or a batch id to handle. Do not use for bug reports or UI changes the user describes directly.
 ---
 
-Work through the PickFix feedback queue for this repository.
+Work through the Pickfix feedback queue for this repository.
 
 1. Call `pickfix_list_batches`. If "$ARGUMENTS" names a batch id, use that batch; otherwise take the oldest queued batch. If none are queued, say so and stop.
 2. Call `pickfix_claim_batch` so no other session works on the same batch. Read every item and look at every screenshot before editing.

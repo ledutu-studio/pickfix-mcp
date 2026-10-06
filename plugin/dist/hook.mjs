@@ -19965,7 +19965,7 @@ function hookOutput(count) {
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "UserPromptSubmit",
-      additionalContext: `PickFix: ${what} waiting for this repository. Run /pickfix:fix to handle ${it}, or ignore this if the user is asking about something else.`
+      additionalContext: `Pickfix: ${what} waiting for this repository. Run /pickfix:fix to handle ${it}, or ignore this if the user is asking about something else.`
     }
   });
 }

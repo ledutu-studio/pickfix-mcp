@@ -1,4 +1,4 @@
-// The PickFix item on the Chrome Web Store (Developer Dashboard → Package → View public key).
+// The Pickfix item on the Chrome Web Store (Developer Dashboard → Package → View public key).
 // Google holds the private key. Unpacked development builds put this public key in their manifest
 // `key`, so they get the same id as the store build and pickfix-mcp accepts both.
 

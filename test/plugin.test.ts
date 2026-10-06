@@ -28,7 +28,7 @@ describe('plugin packaging', () => {
     const plugin = json('plugin/.claude-plugin/plugin.json');
     expect(plugin.name).toBe('pickfix');
     expect(plugin.mcpServers.pickfix).toEqual({ command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/dist/server.mjs'] });
-    expect(plugin.channels).toEqual([{ server: 'pickfix', displayName: 'PickFix' }]);
+    expect(plugin.channels).toEqual([{ server: 'pickfix', displayName: 'Pickfix' }]);
   });
 
   it('keeps every version in step', () => {

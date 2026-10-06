@@ -1,7 +1,7 @@
 {
   "name": "@pickfix/protocol",
   "version": "0.2.0",
-  "description": "Wire protocol, schemas and batch markdown shared by the PickFix extension and pickfix-mcp.",
+  "description": "Wire protocol, schemas and batch markdown shared by the Pickfix extension and pickfix-mcp.",
   "type": "module",
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "files": ["dist"],

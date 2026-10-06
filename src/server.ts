@@ -101,7 +101,7 @@ export async function main(): Promise<void> {
   mcp.server.oninitialized = () => {
     setUp().catch((error) => {
       log(`Start-up failed: ${(error as Error).stack ?? String(error)}`);
-      rejectDeps(new Error(`PickFix could not start: ${(error as Error).message ?? String(error)}`));
+      rejectDeps(new Error(`Pickfix could not start: ${(error as Error).message ?? String(error)}`));
     });
   };
   mcp.server.onclose = shutdown;

@@ -1,7 +1,7 @@
 {
   "name": "pickfix-mcp",
   "version": "1.1.1",
-  "description": "Local MCP server that receives UI feedback from the PickFix browser extension and hands it to your coding agent.",
+  "description": "Local MCP server that receives UI feedback from the Pickfix browser extension and hands it to your coding agent.",
   "license": "MIT",
   "keywords": [
     "mcp",

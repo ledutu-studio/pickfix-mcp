@@ -136,7 +136,7 @@ function renderItem(item: RenderableItem, index: number, total: number, options:
 
 export function renderBatchMarkdown(batch: RenderableBatch, options: RenderOptions = {}): string {
   const header = [
-    `# PickFix batch ${batch.id} — ${plural(batch.items.length, 'item')}`,
+    `# Pickfix batch ${batch.id} — ${plural(batch.items.length, 'item')}`,
     '',
     `- Page: ${inline(batch.page.url, 500)}`,
     `- Route: ${inline(batch.page.path, 300)}`,

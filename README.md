@@ -3,10 +3,10 @@
 [![npm](https://img.shields.io/npm/v/pickfix-mcp)](https://www.npmjs.com/package/pickfix-mcp)
 [![license](https://img.shields.io/npm/l/pickfix-mcp)](LICENSE)
 
-The local half of **PickFix**. The PickFix browser extension lets developers, QA and PMs pick an element on a running web app, say what is wrong (or rewrite the text in place, comment on the page, record the steps to a bug) and press **Send to Claude**. `pickfix-mcp` receives that feedback on your machine and hands it to the coding agent working on the repository, which fixes it and reports back to the extension.
+The local half of **Pickfix**. The Pickfix browser extension lets developers, QA and PMs pick an element on a running web app, say what is wrong (or rewrite the text in place, comment on the page, record the steps to a bug) and press **Send to Claude**. `pickfix-mcp` receives that feedback on your machine and hands it to the coding agent working on the repository, which fixes it and reports back to the extension.
 
 ```text
-Chrome: PickFix extension ──WebSocket, 127.0.0.1──▶ pickfix-mcp ──MCP──▶ Claude Code
+Chrome: Pickfix extension ──WebSocket, 127.0.0.1──▶ pickfix-mcp ──MCP──▶ Claude Code
    pick · comment · send        (extension origin only)   queue        fixes the code
    ◀──────────────── Queued → Claude is fixing → Done, with a summary ─────────────────
 ```
@@ -15,7 +15,7 @@ Chrome: PickFix extension ──WebSocket, 127.0.0.1──▶ pickfix-mcp ──
 
 ## Quick start
 
-1. **Install the extension:** [PickFix on the Chrome Web Store](https://chromewebstore.google.com/detail/eehanlcaccamfaalnfcikkdneffjkife) (in review; the link works once it is published).
+1. **Install the extension:** [Pickfix on the Chrome Web Store](https://chromewebstore.google.com/detail/eehanlcaccamfaalnfcikkdneffjkife) (in review; the link works once it is published).
 2. **Install the plugin in Claude Code**, in your project:
 
    ```text
@@ -24,7 +24,7 @@ Chrome: PickFix extension ──WebSocket, 127.0.0.1──▶ pickfix-mcp ──
    ```
 
    Restart Claude Code. The plugin starts one `pickfix-mcp` server per session.
-3. **Open the PickFix panel** on a local page in Chrome. It finds every running session by itself; there is nothing to pair.
+3. **Open the Pickfix panel** on a local page in Chrome. It finds every running session by itself; there is nothing to pair.
 
 Then pick an element, write what should change and press **Send to Claude**. Requires Node.js 20 or newer.
 
@@ -77,7 +77,7 @@ A batch can be claimed by one session only, so two Claude windows on the same re
 ## Security model
 
 - The server listens on `127.0.0.1` only, on the first free port of 47400–47409, path `/pickfix`.
-- A connection must come from the PickFix extension (`Origin: chrome-extension://<PickFix id>`) to a loopback `Host`; web pages, other extensions and DNS-rebinding hosts are refused at the handshake. Browsers do not let a page set `Origin`, so this is the gate; there is no pairing step. Programs already running under your account can still connect, as they can to any local port.
+- A connection must come from the Pickfix extension (`Origin: chrome-extension://<Pickfix id>`) to a loopback `Host`; web pages, other extensions and DNS-rebinding hosts are refused at the handshake. Browsers do not let a page set `Origin`, so this is the gate; there is no pairing step. Programs already running under your account can still connect, as they can to any local port.
 - Everything captured from a web page is passed to the agent as fenced, untrusted data with an instruction never to follow it.
 - The server has no tool that runs commands or writes files in your repository; code changes go through your agent's normal permissions.
 
@@ -112,7 +112,7 @@ pnpm compile       # type-check
 pnpm --filter @pickfix/protocol build   # build the protocol package the extension links to
 ```
 
-`PICKFIX_EXTENSION_IDS=<id>[,<id>]` allows extra extension ids, for unpacked builds made without the PickFix key.
+`PICKFIX_EXTENSION_IDS=<id>[,<id>]` allows extra extension ids, for unpacked builds made without the Pickfix key.
 
 The extension's id is its Chrome Web Store item id, `eehanlcaccamfaalnfcikkdneffjkife`. `EXTENSION_PUBLIC_KEY` in `@pickfix/protocol` is that item's public key (Developer Dashboard → Package → View public key); Google holds the private key, so nothing secret lives on a developer machine.
 
@@ -126,9 +126,9 @@ The extension's id is its Chrome Web Store item id, `eehanlcaccamfaalnfcikkdneff
 
 ## Tiếng Việt
 
-PickFix giúp dev frontend, QA và PM chỉ vào chỗ sai trên giao diện đang chạy, ghi cần sửa gì, rồi gửi thẳng cho Claude Code sửa trong source. `pickfix-mcp` là phần chạy trên máy bạn: nhận feedback từ extension qua `127.0.0.1` và chuyển cho Claude.
+Pickfix giúp dev frontend, QA và PM chỉ vào chỗ sai trên giao diện đang chạy, ghi cần sửa gì, rồi gửi thẳng cho Claude Code sửa trong source. `pickfix-mcp` là phần chạy trên máy bạn: nhận feedback từ extension qua `127.0.0.1` và chuyển cho Claude.
 
-1. **Cài extension:** [PickFix trên Chrome Web Store](https://chromewebstore.google.com/detail/eehanlcaccamfaalnfcikkdneffjkife) (đang chờ duyệt).
+1. **Cài extension:** [Pickfix trên Chrome Web Store](https://chromewebstore.google.com/detail/eehanlcaccamfaalnfcikkdneffjkife) (đang chờ duyệt).
 2. **Cài plugin trong Claude Code**, ngay trong project của bạn:
 
    ```text
@@ -137,7 +137,7 @@ PickFix giúp dev frontend, QA và PM chỉ vào chỗ sai trên giao diện đa
    ```
 
    Khởi động lại Claude Code.
-3. **Mở panel PickFix** trên trang localhost. Panel tự tìm các session đang chạy, không cần ghép nối.
+3. **Mở panel Pickfix** trên trang localhost. Panel tự tìm các session đang chạy, không cần ghép nối.
 
 Muốn Claude tự sửa ngay khi nhận feedback, mở Claude bằng `claude --dangerously-load-development-channels plugin:pickfix@pickfix`. Không dùng cờ này thì gõ `/pickfix:fix` khi panel hiện **Đang chờ**. Giao diện extension có tiếng Việt và tiếng Anh, đổi trong phần cài đặt của extension.
 

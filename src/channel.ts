@@ -23,12 +23,12 @@ export function channelEvent(record: BatchRecord): { content: string; meta: { ba
   const path = safePath(page.path);
   const count = `${items.length} item${items.length === 1 ? '' : 's'}`;
   return {
-    content: `PickFix batch ${id}: ${count} on ${path} from ${safeOrigin(page.url)}. Claim it with pickfix_claim_batch { batchId: "${id}" }, make the fixes, then call pickfix_report.`,
+    content: `Pickfix batch ${id}: ${count} on ${path} from ${safeOrigin(page.url)}. Claim it with pickfix_claim_batch { batchId: "${id}" }, make the fixes, then call pickfix_report.`,
     meta: { batch_id: id, items: String(items.length), path },
   };
 }
 
-/** Claude Code drops the event silently when the session did not load PickFix as a channel; the batch stays queued for pull. */
+/** Claude Code drops the event silently when the session did not load Pickfix as a channel; the batch stays queued for pull. */
 export async function announce(server: Server, record: BatchRecord, log: (message: string) => void = defaultLog): Promise<void> {
   try {
     // A Claude Code extension method, so it is not in the SDK's ServerNotification union.

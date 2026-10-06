@@ -84,7 +84,7 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
   server.on('upgrade', (req, socket, head) => {
     // Node removes its own error listener before 'upgrade'; a reset must not become an unhandled error.
     socket.on('error', (error) => log(`Upgrade socket error: ${error.message}`));
-    // The Origin check is the whole gate: only the PickFix extension can open a socket from a browser.
+    // The Origin check is the whole gate: only the Pickfix extension can open a socket from a browser.
     const check = checkUpgrade(req, port, deps.origins);
     if (!check.ok) {
       socket.end(`HTTP/1.1 ${check.status} ${check.status === 403 ? 'Forbidden' : 'Not Found'}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
@@ -173,7 +173,7 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
 
   function onHello(conn: Connection, message: Extract<ClientMessage, { type: 'hello' }>): void {
     if (message.protocol !== PROTOCOL_VERSION) {
-      fail(conn, 'protocol-mismatch', `This server speaks protocol ${PROTOCOL_VERSION} and the extension speaks protocol ${message.protocol}. Update PickFix and pickfix-mcp.`);
+      fail(conn, 'protocol-mismatch', `This server speaks protocol ${PROTOCOL_VERSION} and the extension speaks protocol ${message.protocol}. Update Pickfix and pickfix-mcp.`);
       conn.ws.close(1008, 'Protocol mismatch');
       return;
     }

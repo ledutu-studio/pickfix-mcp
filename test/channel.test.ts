@@ -15,7 +15,7 @@ describe('channelEvent', () => {
   it('names the batch, its size and where it came from, and tells Claude what to call', () => {
     expect(channelEvent(record('/checkout'))).toEqual({
       content:
-        'PickFix batch batch-1: 1 item on /checkout from localhost:5173. Claim it with pickfix_claim_batch { batchId: "batch-1" }, make the fixes, then call pickfix_report.',
+        'Pickfix batch batch-1: 1 item on /checkout from localhost:5173. Claim it with pickfix_claim_batch { batchId: "batch-1" }, make the fixes, then call pickfix_report.',
       meta: { batch_id: 'batch-1', items: '1', path: '/checkout' },
     });
   });

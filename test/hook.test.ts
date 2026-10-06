@@ -32,7 +32,7 @@ describe('hookOutput', () => {
       hookSpecificOutput: {
         hookEventName: 'UserPromptSubmit',
         additionalContext:
-          'PickFix: 1 feedback batch from the browser extension is waiting for this repository. Run /pickfix:fix to handle it, or ignore this if the user is asking about something else.',
+          'Pickfix: 1 feedback batch from the browser extension is waiting for this repository. Run /pickfix:fix to handle it, or ignore this if the user is asking about something else.',
       },
     });
     expect(JSON.parse(hookOutput(2)!).hookSpecificOutput.additionalContext).toContain('2 feedback batches from the browser extension are waiting');

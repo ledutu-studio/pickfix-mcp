@@ -96,7 +96,7 @@ describe('pickfix-mcp end to end', () => {
     const claim = (await agent.client.callTool({ name: 'pickfix_claim_batch', arguments: { batchId: 'batch-1' } })) as {
       content: { type: string }[];
     };
-    expect(textOf(claim)).toContain('# PickFix batch batch-1');
+    expect(textOf(claim)).toContain('# Pickfix batch batch-1');
     expect(claim.content.some((c) => c.type === 'image')).toBe(true);
     expect(await ext.next()).toMatchObject({ type: 'batch.status', batchId: 'batch-1', status: 'working' });
 
@@ -140,7 +140,7 @@ describe('pickfix-mcp end to end', () => {
     ext.send({ v: 1, type: 'batch.submit', requestId: 'r1', batch: makeBatch() });
     await ext.next();
     const claimed = await first.client.callTool({ name: 'pickfix_claim_batch', arguments: {} });
-    expect(textOf(claimed)).toContain('# PickFix batch batch-1');
+    expect(textOf(claimed)).toContain('# Pickfix batch batch-1');
     expect(await ext.next()).toMatchObject({ type: 'batch.status', batchId: 'batch-1', status: 'working' });
     const pid = first.pid;
     expect(pid).toBeGreaterThan(0);
