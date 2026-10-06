@@ -1,7 +1,7 @@
 {
   "name": "pickfix",
   "displayName": "Pickfix",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Receive UI feedback from the Pickfix browser extension (picked elements, text edits, recorded workflows, screenshots) and fix it in this session.",
   "author": { "name": "ledutu" },
   "keywords": ["feedback", "frontend", "ui", "browser-extension", "mcp"],
