@@ -74,8 +74,8 @@ async function until<T>(read: () => T | undefined, ms = 5000): Promise<T> {
 
 async function connectedExtension(agent: Agent) {
   const ext = await connect(agent.port, { origin: ORIGIN });
-  expect(await ext.next()).toMatchObject({ type: 'server.info', app: 'pickfix', protocol: 2 });
-  ext.send({ v: 1, type: 'hello', protocol: 2, client: { extensionVersion: '0.1.0', browser: 'e2e' } });
+  expect(await ext.next()).toMatchObject({ type: 'server.info', app: 'pickfix', protocol: 3 });
+  ext.send({ v: 1, type: 'hello', protocol: 3, client: { extensionVersion: '0.1.0', browser: 'e2e' } });
   expect(await ext.next()).toMatchObject({ type: 'welcome', session: { agent: 'e2e-agent' } });
   return ext;
 }

@@ -1,6 +1,6 @@
 import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MAX_MESSAGE_BYTES, type Session } from '@pickfix/protocol';
+import { MAX_MESSAGE_BYTES, PROTOCOL_VERSION, type Session } from '@pickfix/protocol';
 import { startBridge, type Bridge } from '../src/bridge.js';
 import { QueueStore, type BatchRecord } from '../src/queue-store.js';
 import { allowedOrigins } from '../src/ws-guard.js';
@@ -10,7 +10,7 @@ import { freePorts } from './net-helpers.js';
 import { connect, rejectedStatus, type TestClient } from './ws-client.js';
 
 const session: Session = { sessionId: 'session-a', name: 'shop', cwd: '/Users/dev/shop', startedAt: '2026-10-02T10:00:00Z', agent: 'claude-code', pid: process.pid };
-const hello = () => ({ v: 1, type: 'hello', protocol: 2, client: { extensionVersion: '0.1.0', browser: 'test' } });
+const hello = () => ({ v: 1, type: 'hello', protocol: PROTOCOL_VERSION, client: { extensionVersion: '0.1.0', browser: 'test' } });
 
 let bridge: Bridge;
 let store: QueueStore;
@@ -37,7 +37,7 @@ async function start(overrides: { preAuthMs?: number } = {}) {
 
 async function authed(): Promise<TestClient> {
   const client = await connect(bridge.port);
-  expect(await client.next()).toMatchObject({ type: 'server.info', app: 'pickfix', protocol: 2 });
+  expect(await client.next()).toMatchObject({ type: 'server.info', app: 'pickfix', protocol: PROTOCOL_VERSION });
   client.send(hello());
   expect(await client.next()).toEqual({ v: 1, type: 'welcome', session });
   return client;
@@ -117,6 +117,16 @@ describe('handshake', () => {
     await client.next();
     client.send({ ...hello(), protocol: 1, token: 't'.repeat(64) });
     expect(await client.next()).toMatchObject({ type: 'error', code: 'protocol-mismatch' });
+    expect(await client.closed).toBe(1008);
+  });
+
+  it('tells a protocol 2 extension to update, naming protocol 3', async () => {
+    const client = await connect(bridge.port);
+    await client.next();
+    client.send({ ...hello(), protocol: 2 });
+    const reply = await client.next();
+    expect(reply).toMatchObject({ type: 'error', code: 'protocol-mismatch' });
+    expect(JSON.stringify(reply)).toContain('protocol 3');
     expect(await client.closed).toBe(1008);
   });
 

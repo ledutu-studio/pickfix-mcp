@@ -1,8 +1,12 @@
-import type { Batch, Item } from '../src/index.js';
+import { BATCH_SCHEMA, type Attachment, type Batch, type Item } from '../src/index.js';
 
 /** A valid 1×1 transparent PNG. */
 export const PNG_1PX =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+export function makeAttachment(name = 'figma.png'): Attachment {
+  return { mime: 'image/png', data: PNG_1PX, width: 1, height: 1, name };
+}
 
 export function makeElementItem(id = 'item-1'): Item {
   return {
@@ -34,9 +38,23 @@ export function makeElementItem(id = 'item-1'): Item {
   };
 }
 
+export function makeRegionItem(id = 'region-1'): Item {
+  const element = makeElementItem();
+  return {
+    id,
+    kind: 'region',
+    comment: 'Tighten the spacing between these cards.',
+    page: element.page,
+    viewport: { width: 1280, height: 800, dpr: 2 },
+    region: { rect: { x: 40, y: 120, width: 600, height: 320 }, anchors: [element.anchor!] },
+    screenshot: { mime: 'image/png', data: PNG_1PX, width: 1, height: 1, region: 'area', clipped: false },
+    createdAt: '2026-10-02T10:00:30.000Z',
+  };
+}
+
 export function makeBatch(overrides: Partial<Batch> = {}): Batch {
   return {
-    schema: 'pickfix.batch/1',
+    schema: BATCH_SCHEMA,
     id: 'batch-1',
     createdAt: '2026-10-02T10:01:00.000Z',
     page: { url: 'http://localhost:5173/checkout', path: '/checkout', title: 'Checkout' },

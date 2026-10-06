@@ -40173,7 +40173,7 @@ var StdioServerTransport = class {
 };
 
 // packages/protocol/src/constants.ts
-var PROTOCOL_VERSION = 2;
+var PROTOCOL_VERSION = 3;
 var APP_ID = "pickfix";
 var PORT_FIRST = 47400;
 var PORT_LAST = 47409;
@@ -40185,7 +40185,9 @@ var WS_PATH = "/pickfix";
 var MAX_MESSAGE_BYTES = 15 * 1024 * 1024;
 var MAX_ITEMS_PER_BATCH = 50;
 var MAX_FLOW_STEPS = 500;
-var BATCH_SCHEMA = "pickfix.batch/1";
+var BATCH_SCHEMA = "pickfix.batch/2";
+var MAX_ATTACHMENTS_PER_ITEM = 3;
+var MAX_REGION_ANCHORS = 5;
 var LIMITS = {
   anchorText: 500,
   anchorHtml: 4e3,
@@ -40244,8 +40246,21 @@ var screenshotSchema = external_exports.object({
   data: base643,
   width: external_exports.number().int().positive(),
   height: external_exports.number().int().positive(),
-  region: external_exports.enum(["element", "viewport"]),
+  /** element: the element plus a margin; viewport: the visible page; area: exactly the dragged region. */
+  region: external_exports.enum(["element", "viewport", "area"]),
   clipped: external_exports.boolean()
+});
+var attachmentSchema = external_exports.object({
+  mime: external_exports.enum(["image/png", "image/jpeg"]),
+  data: base643,
+  width: external_exports.number().int().positive(),
+  height: external_exports.number().int().positive(),
+  /** The original file name, shown in exports. */
+  name: external_exports.string().max(200).optional()
+});
+var regionSchema = external_exports.object({
+  rect: rectSchema,
+  anchors: external_exports.array(anchorSchema).max(MAX_REGION_ANCHORS)
 });
 var flowActionSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("click"), anchor: anchorSchema }),
@@ -40285,13 +40300,18 @@ var flowSchema = external_exports.object({
 });
 var itemSchema = external_exports.object({
   id: idSchema,
-  kind: external_exports.enum(["element", "text-edit", "page", "flow"]),
-  comment: external_exports.string().trim().min(1).max(4e3),
+  kind: external_exports.enum(["element", "text-edit", "page", "flow", "region"]),
+  /** May be empty when the item carries at least one reference image. */
+  comment: external_exports.string().trim().max(4e3),
   page: pageRefSchema,
+  /** The viewport when the item was captured; the batch viewport is the one at send time. */
+  viewport: viewportSchema.optional(),
   anchor: anchorSchema.optional(),
   textEdit: external_exports.object({ before: external_exports.string().max(4e3), after: external_exports.string().max(4e3) }).optional(),
   flow: flowSchema.optional(),
+  region: regionSchema.optional(),
   screenshot: screenshotSchema.optional(),
+  attachments: external_exports.array(attachmentSchema).max(MAX_ATTACHMENTS_PER_ITEM).optional(),
   createdAt: timestamp
 }).superRefine((item, ctx) => {
   if ((item.kind === "element" || item.kind === "text-edit") && !item.anchor) {
@@ -40302,6 +40322,12 @@ var itemSchema = external_exports.object({
   }
   if (item.kind === "flow" && !item.flow) {
     ctx.addIssue({ code: "custom", path: ["flow"], message: "A flow item needs flow." });
+  }
+  if (item.kind === "region" && !item.region) {
+    ctx.addIssue({ code: "custom", path: ["region"], message: "A region item needs region." });
+  }
+  if (item.comment.length === 0 && !item.attachments?.length) {
+    ctx.addIssue({ code: "custom", path: ["comment"], message: "An item needs a comment or a reference image." });
   }
 });
 var batchSchema = external_exports.object({

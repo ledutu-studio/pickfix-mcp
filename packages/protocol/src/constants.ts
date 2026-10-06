@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const APP_ID = 'pickfix';
 
 export const PORT_FIRST = 47400;
@@ -12,7 +12,11 @@ export const WS_PATH = '/pickfix';
 export const MAX_MESSAGE_BYTES = 15 * 1024 * 1024;
 export const MAX_ITEMS_PER_BATCH = 50;
 export const MAX_FLOW_STEPS = 500;
-export const BATCH_SCHEMA = 'pickfix.batch/1';
+export const BATCH_SCHEMA = 'pickfix.batch/2';
+/** Reference images the reviewer may attach to one item. */
+export const MAX_ATTACHMENTS_PER_ITEM = 3;
+/** Elements recorded for a dragged region: the largest ones fully inside it. */
+export const MAX_REGION_ANCHORS = 5;
 
 export const LIMITS = {
   anchorText: 500,

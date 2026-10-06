@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { BATCH_SCHEMA, ID_PATTERN, LIMITS, MAX_FLOW_STEPS, MAX_ITEMS_PER_BATCH } from './constants.js';
+import {
+  BATCH_SCHEMA,
+  ID_PATTERN,
+  LIMITS,
+  MAX_ATTACHMENTS_PER_ITEM,
+  MAX_FLOW_STEPS,
+  MAX_ITEMS_PER_BATCH,
+  MAX_REGION_ANCHORS,
+} from './constants.js';
 
 export const idSchema = z.string().regex(ID_PATTERN);
 const timestamp = z.string().min(1).max(64);
@@ -51,8 +59,25 @@ export const screenshotSchema = z.object({
   data: base64,
   width: z.number().int().positive(),
   height: z.number().int().positive(),
-  region: z.enum(['element', 'viewport']),
+  /** element: the element plus a margin; viewport: the visible page; area: exactly the dragged region. */
+  region: z.enum(['element', 'viewport', 'area']),
   clipped: z.boolean(),
+});
+
+/** A reference image the reviewer attached: the look they want, not the page's current state. */
+export const attachmentSchema = z.object({
+  mime: z.enum(['image/png', 'image/jpeg']),
+  data: base64,
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  /** The original file name, shown in exports. */
+  name: z.string().max(200).optional(),
+});
+
+/** A box the reviewer dragged over the page, in viewport CSS pixels, and the largest elements fully inside it. */
+export const regionSchema = z.object({
+  rect: rectSchema,
+  anchors: z.array(anchorSchema).max(MAX_REGION_ANCHORS),
 });
 
 export const flowActionSchema = z.discriminatedUnion('type', [
@@ -97,13 +122,18 @@ export const flowSchema = z.object({
 export const itemSchema = z
   .object({
     id: idSchema,
-    kind: z.enum(['element', 'text-edit', 'page', 'flow']),
-    comment: z.string().trim().min(1).max(4000),
+    kind: z.enum(['element', 'text-edit', 'page', 'flow', 'region']),
+    /** May be empty when the item carries at least one reference image. */
+    comment: z.string().trim().max(4000),
     page: pageRefSchema,
+    /** The viewport when the item was captured; the batch viewport is the one at send time. */
+    viewport: viewportSchema.optional(),
     anchor: anchorSchema.optional(),
     textEdit: z.object({ before: z.string().max(4000), after: z.string().max(4000) }).optional(),
     flow: flowSchema.optional(),
+    region: regionSchema.optional(),
     screenshot: screenshotSchema.optional(),
+    attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS_PER_ITEM).optional(),
     createdAt: timestamp,
   })
   .superRefine((item, ctx) => {
@@ -115,6 +145,12 @@ export const itemSchema = z
     }
     if (item.kind === 'flow' && !item.flow) {
       ctx.addIssue({ code: 'custom', path: ['flow'], message: 'A flow item needs flow.' });
+    }
+    if (item.kind === 'region' && !item.region) {
+      ctx.addIssue({ code: 'custom', path: ['region'], message: 'A region item needs region.' });
+    }
+    if (item.comment.length === 0 && !item.attachments?.length) {
+      ctx.addIssue({ code: 'custom', path: ['comment'], message: 'An item needs a comment or a reference image.' });
     }
   });
 
@@ -165,6 +201,8 @@ export type Viewport = z.infer<typeof viewportSchema>;
 export type SourceHint = z.infer<typeof sourceHintSchema>;
 export type Anchor = z.infer<typeof anchorSchema>;
 export type Screenshot = z.infer<typeof screenshotSchema>;
+export type Attachment = z.infer<typeof attachmentSchema>;
+export type Region = z.infer<typeof regionSchema>;
 export type FlowAction = z.infer<typeof flowActionSchema>;
 export type FlowStep = z.infer<typeof flowStepSchema>;
 export type Flow = z.infer<typeof flowSchema>;
