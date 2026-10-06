@@ -26,6 +26,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const MAX_INLINE_CHARS = 60_000;
 const MAX_CLAIM_CHARS = 80_000;
+const MISSING_FILE = 'missing from the queue folder';
 const IMAGE_COST_CHARS = 1_600 * 4;
 
 function compactLine(text: string, max: number): string {
@@ -76,12 +77,12 @@ function claimMarkdown(deps: ToolDeps, record: BatchRecord): ToolResult {
   const refs = new Map<string, string>();
   for (const item of batch.items) {
     const shotPath = deps.store.screenshotPath(batch.id, item);
-    if (item.screenshot && shotPath) {
-      shots.set(item.id, attach(shotPath, () => deps.store.screenshotBase64(batch.id, item), item.screenshot.mime));
+    if (item.screenshot) {
+      shots.set(item.id, shotPath ? attach(shotPath, () => deps.store.screenshotBase64(batch.id, item), item.screenshot.mime) : MISSING_FILE);
     }
     item.attachments?.forEach((attachment, n) => {
       const path = deps.store.attachmentPath(batch.id, attachment);
-      if (path) refs.set(`${item.id}#${n}`, attach(path, () => deps.store.attachmentBase64(batch.id, attachment), attachment.mime));
+      refs.set(`${item.id}#${n}`, path ? attach(path, () => deps.store.attachmentBase64(batch.id, attachment), attachment.mime) : MISSING_FILE);
     });
   }
 
@@ -224,7 +225,13 @@ export function registerTools(server: McpServer, getDeps: () => Promise<ToolDeps
       }
       const schema = typeof data === 'object' && data !== null ? (data as { schema?: unknown }).schema : undefined;
       if (typeof schema === 'string' && schema.startsWith('pickfix.batch/') && schema !== BATCH_SCHEMA) {
-        return error(`${file}: This file was exported by an older Pickfix. Export it again with the current extension.`);
+        const version = Number(schema.slice('pickfix.batch/'.length));
+        const current = Number(BATCH_SCHEMA.slice('pickfix.batch/'.length));
+        return error(
+          Number.isFinite(version) && version > current
+            ? `${file}: This file was exported by a newer Pickfix. Update pickfix-mcp.`
+            : `${file}: This file was exported by an older Pickfix. Export it again with the current extension.`,
+        );
       }
       const parsed = batchSchema.safeParse(data);
       if (!parsed.success) return error(`${file} is not a Pickfix batch export. ${z.prettifyError(parsed.error).slice(0, 800)}`);

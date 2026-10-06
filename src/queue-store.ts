@@ -85,7 +85,7 @@ function storeImages(dir: string, item: Item): StoredItem {
   }
   if (attachments?.length) {
     stored.attachments = attachments.map(({ data, ...meta }, n) => {
-      const file = `${item.id}-ref-${n + 1}.${extensionFor(meta.mime)}`;
+      const file = `${item.id}.ref-${n + 1}.${extensionFor(meta.mime)}`;
       writeFileSync(join(dir, file), Buffer.from(data, 'base64'), { mode: 0o600 });
       return { ...meta, file };
     });

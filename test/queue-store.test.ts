@@ -147,19 +147,29 @@ describe('QueueStore screenshots', () => {
 });
 
 describe('QueueStore reference images', () => {
-  it('writes each attachment as <itemId>-ref-<n> and keeps only metadata in batch.json', () => {
+  it('writes each attachment as <itemId>.ref-<n> and keeps only metadata in batch.json', () => {
     const { store } = newStore();
     const item = { ...makeElementItem(), attachments: [makeAttachment('a.png'), { ...makeAttachment('b.jpg'), mime: 'image/jpeg' as const }] };
     store.add(makeBatch({ items: [item] }), 's');
     const dir = join(store.dir, 'batch-1');
-    expect(readFileSync(join(dir, 'item-1-ref-1.png')).toString('base64')).toBe(PNG_1PX);
-    expect(existsSync(join(dir, 'item-1-ref-2.jpg'))).toBe(true);
+    expect(readFileSync(join(dir, 'item-1.ref-1.png')).toString('base64')).toBe(PNG_1PX);
+    expect(existsSync(join(dir, 'item-1.ref-2.jpg'))).toBe(true);
     const stored = JSON.parse(readFileSync(join(dir, 'batch.json'), 'utf8'));
     expect(stored.items[0].attachments).toEqual([
-      { mime: 'image/png', width: 1, height: 1, name: 'a.png', file: 'item-1-ref-1.png' },
-      { mime: 'image/jpeg', width: 1, height: 1, name: 'b.jpg', file: 'item-1-ref-2.jpg' },
+      { mime: 'image/png', width: 1, height: 1, name: 'a.png', file: 'item-1.ref-1.png' },
+      { mime: 'image/jpeg', width: 1, height: 1, name: 'b.jpg', file: 'item-1.ref-2.jpg' },
     ]);
     expect(JSON.stringify(stored)).not.toContain(PNG_1PX);
+  });
+
+  it('never collides with another item\'s screenshot, even when the ids look alike', () => {
+    const { store } = newStore();
+    const a = { ...makeElementItem('x'), attachments: [makeAttachment('a.png')] };
+    const b = makeElementItem('x-ref-1');
+    store.add(makeBatch({ items: [a, b] }), 's');
+    const files = readdirSync(join(store.dir, 'batch-1'));
+    expect(files).toContain('x.ref-1.png');
+    expect(files).toContain('x-ref-1.png');
   });
 
   it('returns base64 and a path for a stored attachment, and nothing when the file is gone', () => {

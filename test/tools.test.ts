@@ -117,6 +117,7 @@ describe('pickfix_claim_batch', () => {
       await other.close();
     }
   });
+
   it('attaches the screenshot, then the reference images, each labelled', async () => {
     const item = { ...makeRegionItem('item-1'), attachments: [makeAttachment('a.png'), makeAttachment('b.png')] };
     deps.store.add(makeBatch({ items: [item] }), 's');
@@ -124,7 +125,7 @@ describe('pickfix_claim_batch', () => {
     const md = text(result);
     expect(result.content.filter((c) => c.type === 'image')).toHaveLength(3);
     expect(md).toMatch(/\*\*Screenshot \(current state\):\*\* attached as image 1 \(also at \S+item-1\.png\)/);
-    expect(md).toMatch(/1\. attached as image 2 \(also at \S+item-1-ref-1\.png\)\n2\. attached as image 3 \(also at \S+item-1-ref-2\.png\)/);
+    expect(md).toMatch(/1\. attached as image 2 \(also at \S+item-1.ref-1\.png\)\n2\. attached as image 3 \(also at \S+item-1.ref-2\.png\)/);
   });
 
   it('attaches at most eight images in item order and points to the rest on disk', async () => {
@@ -136,9 +137,9 @@ describe('pickfix_claim_batch', () => {
     const result = (await call('pickfix_claim_batch')) as { content: { type: string }[] };
     const md = text(result);
     expect(result.content.filter((c) => c.type === 'image')).toHaveLength(8);
-    expect(md).toMatch(/3\. attached as image 8 \(also at \S+item-2-ref-3\.png\)/);
+    expect(md).toMatch(/3\. attached as image 8 \(also at \S+item-2.ref-3\.png\)/);
     expect(md).toMatch(/\*\*Screenshot \(current state\):\*\* not attached \(too many images\); read it from \S+item-3\.png/);
-    expect(md).toMatch(/1\. not attached \(too many images\); read it from \S+item-3-ref-1\.png/);
+    expect(md).toMatch(/1\. not attached \(too many images\); read it from \S+item-3.ref-1\.png/);
   });
 
   it('skips a reference image whose file is gone without failing the claim', async () => {
@@ -147,7 +148,16 @@ describe('pickfix_claim_batch', () => {
     const result = (await call('pickfix_claim_batch')) as { content: { type: string }[]; isError?: boolean };
     expect(result.isError).toBeFalsy();
     expect(result.content.filter((c) => c.type === 'image')).toHaveLength(1);
-    expect(text(result)).toContain('1. included in the batch file');
+    expect(text(result)).toContain('1. missing from the queue folder');
+    expect(text(result)).not.toContain('included in the batch file');
+  });
+
+  it('labels a screenshot whose file is gone as missing from the queue folder', async () => {
+    const { record } = deps.store.add(makeBatch({ items: [makeElementItem()] }), 's');
+    rmSync(deps.store.screenshotPath('batch-1', record.batch.items[0]!)!);
+    const result = (await call('pickfix_claim_batch')) as { content: { type: string }[] };
+    expect(result.content.filter((c) => c.type === 'image')).toHaveLength(0);
+    expect(text(result)).toContain('**Screenshot (current state):** missing from the queue folder');
   });
 });
 
@@ -234,6 +244,15 @@ describe('pickfix_import', () => {
     expect(result.isError).toBe(true);
     expect(text(result)).toContain('This file was exported by an older Pickfix. Export it again with the current extension.');
     expect(deps.store.readState('old')).toBeUndefined();
+  });
+
+  it('tells the user to update pickfix-mcp when the file comes from a newer Pickfix', async () => {
+    const file = join(deps.repoRoot, 'new.json');
+    writeFileSync(file, JSON.stringify({ ...makeBatch({ id: 'new' }), schema: 'pickfix.batch/99' }));
+    const result = (await call('pickfix_import', { path: file })) as { isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain('This file was exported by a newer Pickfix. Update pickfix-mcp.');
+    expect(deps.store.readState('new')).toBeUndefined();
   });
 
   it('explains an invalid file', async () => {

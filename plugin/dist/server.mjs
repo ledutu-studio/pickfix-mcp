@@ -40432,6 +40432,7 @@ function encodeMessage(message) {
 // packages/protocol/src/markdown.ts
 var NO_COMMENT_REQUEST = "The reviewer wrote no description. Make the target match the attached reference image(s).";
 var LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+var TAG_NAME = /^[a-z][a-z0-9-]{0,49}$/i;
 var COMPONENT_NAME = /^[A-Za-z0-9_$.:@<>-]{1,200}$/;
 function inline(text, max) {
   const controlCharPattern = new RegExp("[\0-\x7F\u2028\u2029]", "g");
@@ -40541,7 +40542,7 @@ ${quote(item.flow.actual)}`);
   if (item.anchor) where.push(...sourceLines(item.anchor.source, options));
   if (item.region) {
     item.region.anchors.forEach((anchor2, i) => {
-      where.push(`- Element ${i + 1} in the region: <${inline(anchor2.tag, 50)}>`);
+      where.push(`- Element ${i + 1} in the region: <${TAG_NAME.test(anchor2.tag) ? anchor2.tag : "element"}>`);
       where.push(...sourceLines(anchor2.source, options).map((line) => `  ${line}`));
     });
     if (item.region.anchors.length === 0) where.push("- No element lies fully inside the region; use the screenshot and the route.");
@@ -40738,7 +40739,7 @@ Content-Length: 0\r
   }
   function onMessage(conn, buffer) {
     if (buffer.length > MAX_MESSAGE_BYTES) {
-      fail(conn, "too-large", "The message is larger than 15 MB. Send fewer items or remove some screenshots.");
+      fail(conn, "too-large", "The message is larger than 15 MB. Send fewer items or remove some screenshots or reference images.");
       if (!conn.authed) conn.ws.close(1008, "Message too large");
       return;
     }
@@ -41008,7 +41009,7 @@ function storeImages(dir, item) {
   }
   if (attachments?.length) {
     stored.attachments = attachments.map(({ data, ...meta3 }, n) => {
-      const file2 = `${item.id}-ref-${n + 1}.${extensionFor(meta3.mime)}`;
+      const file2 = `${item.id}.ref-${n + 1}.${extensionFor(meta3.mime)}`;
       writeFileSync2(join2(dir, file2), Buffer.from(data, "base64"), { mode: 384 });
       return { ...meta3, file: file2 };
     });
@@ -41374,6 +41375,7 @@ var error62 = (text) => ({ content: [{ type: "text", text }], isError: true });
 var plural3 = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 var MAX_INLINE_CHARS = 6e4;
 var MAX_CLAIM_CHARS = 8e4;
+var MISSING_FILE = "missing from the queue folder";
 var IMAGE_COST_CHARS = 1600 * 4;
 function compactLine(text, max) {
   return text.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, " ").replace(/`/g, "'").replace(/\s+/g, " ").trim().slice(0, max);
@@ -41417,12 +41419,12 @@ ${lines.join("\n")}`;
   const refs = /* @__PURE__ */ new Map();
   for (const item of batch.items) {
     const shotPath = deps.store.screenshotPath(batch.id, item);
-    if (item.screenshot && shotPath) {
-      shots.set(item.id, attach(shotPath, () => deps.store.screenshotBase64(batch.id, item), item.screenshot.mime));
+    if (item.screenshot) {
+      shots.set(item.id, shotPath ? attach(shotPath, () => deps.store.screenshotBase64(batch.id, item), item.screenshot.mime) : MISSING_FILE);
     }
     item.attachments?.forEach((attachment, n) => {
       const path = deps.store.attachmentPath(batch.id, attachment);
-      if (path) refs.set(`${item.id}#${n}`, attach(path, () => deps.store.attachmentBase64(batch.id, attachment), attachment.mime));
+      refs.set(`${item.id}#${n}`, path ? attach(path, () => deps.store.attachmentBase64(batch.id, attachment), attachment.mime) : MISSING_FILE);
     });
   }
   const markdown = render(shots, refs);
@@ -41554,7 +41556,11 @@ function registerTools(server, getDeps) {
       }
       const schema = typeof data === "object" && data !== null ? data.schema : void 0;
       if (typeof schema === "string" && schema.startsWith("pickfix.batch/") && schema !== BATCH_SCHEMA) {
-        return error62(`${file2}: This file was exported by an older Pickfix. Export it again with the current extension.`);
+        const version2 = Number(schema.slice("pickfix.batch/".length));
+        const current = Number(BATCH_SCHEMA.slice("pickfix.batch/".length));
+        return error62(
+          Number.isFinite(version2) && version2 > current ? `${file2}: This file was exported by a newer Pickfix. Update pickfix-mcp.` : `${file2}: This file was exported by an older Pickfix. Export it again with the current extension.`
+        );
       }
       const parsed = batchSchema.safeParse(data);
       if (!parsed.success) return error62(`${file2} is not a Pickfix batch export. ${external_exports.prettifyError(parsed.error).slice(0, 800)}`);

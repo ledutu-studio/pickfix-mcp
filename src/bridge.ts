@@ -139,7 +139,7 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
 
   function onMessage(conn: Connection, buffer: Buffer): void {
     if (buffer.length > MAX_MESSAGE_BYTES) {
-      fail(conn, 'too-large', 'The message is larger than 15 MB. Send fewer items or remove some screenshots.');
+      fail(conn, 'too-large', 'The message is larger than 15 MB. Send fewer items or remove some screenshots or reference images.');
       if (!conn.authed) conn.ws.close(1008, 'Message too large');
       return;
     }

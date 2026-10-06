@@ -22,6 +22,7 @@ export const NO_COMMENT_REQUEST = 'The reviewer wrote no description. Make the t
 /** Slices can split a surrogate pair; the model API rejects unpaired surrogates. */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
+const TAG_NAME = /^[a-z][a-z0-9-]{0,49}$/i;
 const COMPONENT_NAME = /^[A-Za-z0-9_$.:@<>-]{1,200}$/;
 
 /** Sanitizes inline text from page data to prevent markdown injection. */
@@ -142,7 +143,7 @@ function renderItem(item: RenderableItem, index: number, total: number, options:
   if (item.anchor) where.push(...sourceLines(item.anchor.source, options));
   if (item.region) {
     item.region.anchors.forEach((anchor, i) => {
-      where.push(`- Element ${i + 1} in the region: <${inline(anchor.tag, 50)}>`);
+      where.push(`- Element ${i + 1} in the region: <${TAG_NAME.test(anchor.tag) ? anchor.tag : 'element'}>`);
       where.push(...sourceLines(anchor.source, options).map((line) => `  ${line}`));
     });
     if (item.region.anchors.length === 0) where.push('- No element lies fully inside the region; use the screenshot and the route.');

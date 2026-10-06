@@ -15,7 +15,7 @@
 - Work in `/Users/tungle/ledutu/frontend-quickfix/pickfix-mcp`. Before running anything: `export PATH="$HOME/.nvm/versions/node/v22.23.2/bin:$PATH"`.
 - `PROTOCOL_VERSION = 3`; `BATCH_SCHEMA = 'pickfix.batch/2'`; `MAX_ATTACHMENTS_PER_ITEM = 3`; `MAX_REGION_ANCHORS = 5`. Strict version match as today; no compatibility layer ("there are no users yet").
 - `pickfix_import` accepts only `pickfix.batch/2`; a `/1` file gets "This file was exported by an older Pickfix. Export it again with the current extension."
-- Attachment files on disk: `<batchDir>/<itemId>-ref-<n>.<png|jpg>` with `n` starting at 1, mode `0o600`, like screenshots.
+- Attachment files on disk: `<batchDir>/<itemId>.ref-<n>.<png|jpg>` with `n` starting at 1, mode `0o600`, like screenshots.
 - Claim images: in item order — the item's screenshot, then its reference images — while `MAX_IMAGES_PER_CLAIM` (8) and the character budget allow. Labels: `attached as image k (also at <path>)` or `not attached (too many images); read it from <path>`.
 - Everything Claude reads (markdown, tool descriptions, errors, skill, prompt, server instructions) is English.
 - `plugin/dist/*.mjs` is committed and a test (`test/bundle.test.ts`) checks it is fresh: every task that changes `src/` or `packages/protocol/src/` runs `pnpm build` and commits `plugin/dist` with the change.
@@ -589,17 +589,17 @@ and append:
 
 ```ts
 describe('QueueStore reference images', () => {
-  it('writes each attachment as <itemId>-ref-<n> and keeps only metadata in batch.json', () => {
+  it('writes each attachment as <itemId>.ref-<n> and keeps only metadata in batch.json', () => {
     const { store } = newStore();
     const item = { ...makeElementItem(), attachments: [makeAttachment('a.png'), { ...makeAttachment('b.jpg'), mime: 'image/jpeg' as const }] };
     store.add(makeBatch({ items: [item] }), 's');
     const dir = join(store.dir, 'batch-1');
-    expect(readFileSync(join(dir, 'item-1-ref-1.png')).toString('base64')).toBe(PNG_1PX);
-    expect(existsSync(join(dir, 'item-1-ref-2.jpg'))).toBe(true);
+    expect(readFileSync(join(dir, 'item-1.ref-1.png')).toString('base64')).toBe(PNG_1PX);
+    expect(existsSync(join(dir, 'item-1.ref-2.jpg'))).toBe(true);
     const stored = JSON.parse(readFileSync(join(dir, 'batch.json'), 'utf8'));
     expect(stored.items[0].attachments).toEqual([
-      { mime: 'image/png', width: 1, height: 1, name: 'a.png', file: 'item-1-ref-1.png' },
-      { mime: 'image/jpeg', width: 1, height: 1, name: 'b.jpg', file: 'item-1-ref-2.jpg' },
+      { mime: 'image/png', width: 1, height: 1, name: 'a.png', file: 'item-1.ref-1.png' },
+      { mime: 'image/jpeg', width: 1, height: 1, name: 'b.jpg', file: 'item-1.ref-2.jpg' },
     ]);
     expect(JSON.stringify(stored)).not.toContain(PNG_1PX);
   });
@@ -635,7 +635,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'no
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run test/queue-store.test.ts`
-Expected: FAIL — no `item-1-ref-1.png`; `attachmentPath` is not a function.
+Expected: FAIL — no `item-1.ref-1.png`; `attachmentPath` is not a function.
 
 - [ ] **Step 3: Implement**
 
@@ -671,7 +671,7 @@ function storeImages(dir: string, item: Item): StoredItem {
   }
   if (attachments?.length) {
     stored.attachments = attachments.map(({ data, ...meta }, n) => {
-      const file = `${item.id}-ref-${n + 1}.${extensionFor(meta.mime)}`;
+      const file = `${item.id}.ref-${n + 1}.${extensionFor(meta.mime)}`;
       writeFileSync(join(dir, file), Buffer.from(data, 'base64'), { mode: 0o600 });
       return { ...meta, file };
     });
@@ -756,7 +756,7 @@ Add inside `describe('pickfix_claim_batch', …)`:
     const md = text(result);
     expect(result.content.filter((c) => c.type === 'image')).toHaveLength(3);
     expect(md).toMatch(/\*\*Screenshot \(current state\):\*\* attached as image 1 \(also at \S+item-1\.png\)/);
-    expect(md).toMatch(/1\. attached as image 2 \(also at \S+item-1-ref-1\.png\)\n2\. attached as image 3 \(also at \S+item-1-ref-2\.png\)/);
+    expect(md).toMatch(/1\. attached as image 2 \(also at \S+item-1.ref-1\.png\)\n2\. attached as image 3 \(also at \S+item-1.ref-2\.png\)/);
   });
 
   it('attaches at most eight images in item order and points to the rest on disk', async () => {
@@ -768,9 +768,9 @@ Add inside `describe('pickfix_claim_batch', …)`:
     const result = (await call('pickfix_claim_batch')) as { content: { type: string }[] };
     const md = text(result);
     expect(result.content.filter((c) => c.type === 'image')).toHaveLength(8);
-    expect(md).toMatch(/3\. attached as image 8 \(also at \S+item-2-ref-3\.png\)/);
+    expect(md).toMatch(/3\. attached as image 8 \(also at \S+item-2.ref-3\.png\)/);
     expect(md).toMatch(/\*\*Screenshot \(current state\):\*\* not attached \(too many images\); read it from \S+item-3\.png/);
-    expect(md).toMatch(/1\. not attached \(too many images\); read it from \S+item-3-ref-1\.png/);
+    expect(md).toMatch(/1\. not attached \(too many images\); read it from \S+item-3.ref-1\.png/);
   });
 
   it('skips a reference image whose file is gone without failing the claim', async () => {
