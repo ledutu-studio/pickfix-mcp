@@ -17,6 +17,8 @@ Nothing is collected until you act on a page. The extension runs on local develo
 | When you… | Pickfix keeps |
 |---|---|
 | Pick an element | Your comment; the page URL and title; the element's tag, selector, text, attributes, a short HTML excerpt and key styles; where it lives in your source code; a screenshot of the element |
+| Drag over an area | Your comment; the area's position and size; the same details as above for up to five elements inside it; a screenshot of the area |
+| Attach a reference image | The image you paste, drop or choose, stored with that feedback and sent with it |
 | Rewrite text in place | The text before and after your edit |
 | Add a page comment | Your comment and the page URL |
 | Record a workflow | Clicks, typed values, selections, key presses and page changes; console errors and failed network requests on that page while recording |
@@ -69,6 +71,8 @@ Extension không thu thập gì cho tới khi bạn thao tác trên trang. Exten
 | Khi bạn… | Pickfix lưu |
 |---|---|
 | Chọn một phần tử | Ghi chú của bạn; URL và tiêu đề trang; tag, selector, nội dung chữ, thuộc tính, một đoạn HTML ngắn và các style chính của phần tử; vị trí của nó trong source code; ảnh chụp phần tử |
+| Kéo chọn một vùng | Ghi chú của bạn; vị trí và kích thước vùng; các thông tin như trên cho tối đa năm phần tử nằm trong vùng; ảnh chụp vùng đó |
+| Đính kèm ảnh mẫu | Ảnh bạn dán, kéo thả hoặc chọn, lưu cùng góp ý đó và gửi kèm theo |
 | Sửa chữ trực tiếp | Nội dung trước và sau khi sửa |
 | Thêm ghi chú trang | Ghi chú của bạn và URL trang |
 | Ghi thao tác | Các cú click, giá trị đã nhập, lựa chọn, phím bấm và chuyển trang; lỗi console và request mạng thất bại trên trang đó trong lúc ghi |

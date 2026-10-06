@@ -68,7 +68,7 @@ Start the client from your project folder: the server queues feedback per reposi
 |---|---|
 | `pickfix_status` | Session, repository, port, batch counts |
 | `pickfix_list_batches` | Queued and working batches (or by status) |
-| `pickfix_claim_batch` | Claims a batch and returns its items as markdown plus screenshots |
+| `pickfix_claim_batch` | Claims a batch and returns its items as markdown plus screenshots and reference images |
 | `pickfix_report` | Reports `done` / `partial` / `failed` with a summary and per-item results |
 | `pickfix_import` | Queues a JSON file exported from the extension |
 
@@ -87,14 +87,14 @@ Full privacy policy (English and Vietnamese): [PRIVACY.md](PRIVACY.md).
 
 ```text
 ~/.pickfix/                 0700
-  queue/<repo-key>/<batch>/ batch.json, state.json, screenshots
+  queue/<repo-key>/<batch>/ batch.json, state.json, screenshots, reference images
 ```
 
 Finished batches are deleted after 7 days. Set `PICKFIX_HOME` to use another directory.
 
 ## Protocol
 
-The extension and server speak protocol 2 over WebSocket; the full contract is section 5 of `docs/specs/2026-10-02-pickfix-mcp-design.md`, and its types and schemas ship as `@pickfix/protocol` (`packages/protocol`).
+The extension and server speak protocol 3 over WebSocket; the batch format is `pickfix.batch/2`. The original contract is section 5 of `docs/specs/2026-10-02-pickfix-mcp-design.md`; protocol 3's additions (regions, reference images, per-item viewport) are in the extension repo's `docs/specs/2026-10-06-capture-upgrades-design.md`. Types and schemas ship as `@pickfix/protocol` (`packages/protocol`).
 
 | Direction | Messages |
 |---|---|

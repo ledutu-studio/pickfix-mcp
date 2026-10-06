@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { makeBatch } from '../../packages/protocol/test/fixtures.js';
+import { makeAttachment, makeBatch, makeRegionItem } from '../../packages/protocol/test/fixtures.js';
 import { tempDir, tempHome } from '../helpers.js';
 import { connect as rawConnect, rejectedStatus, type TestClient } from '../ws-client.js';
 
@@ -109,6 +109,22 @@ describe('pickfix-mcp end to end', () => {
       status: 'done',
       report: { summary: 'Made the button full-width in CheckoutSummary.tsx.', items: [{ itemId: 'item-1', outcome: 'done' }] },
     });
+  });
+
+  it('carries a region item with reference images from the extension to the claim', async () => {
+    const agent = await startAgent(tempHome(), realpathSync(tempDir()));
+    const ext = await connectedExtension(agent);
+    const item = { ...makeRegionItem('item-1'), comment: '', attachments: [makeAttachment('a.png'), makeAttachment('b.png')] };
+    ext.send({ v: 1, type: 'batch.submit', requestId: 'r1', batch: makeBatch({ id: 'batch-r', items: [item] }) });
+    expect(await ext.next()).toMatchObject({ type: 'batch.accepted', batchId: 'batch-r', status: 'queued' });
+    const claim = (await agent.client.callTool({ name: 'pickfix_claim_batch', arguments: { batchId: 'batch-r' } })) as {
+      content: { type: string }[];
+    };
+    const md = textOf(claim);
+    expect(md).toContain('## Item 1 of 1 · region · `item-1`');
+    expect(md).toContain('The reviewer wrote no description. Make the target match the attached reference image(s).');
+    expect(md).toContain('**Reference images (desired look, provided by the reviewer):**');
+    expect(claim.content.filter((c) => c.type === 'image')).toHaveLength(3);
   });
 
   it('refuses a web page origin and tells an old extension to update', async () => {

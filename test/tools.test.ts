@@ -250,6 +250,9 @@ it('serves the fix prompt with the batch id filled in', async () => {
   const body = (prompt.messages[0]?.content as { text: string }).text;
   expect(body).toContain('pickfix_claim_batch');
   expect(body).toContain('"batch-9" names a batch id');
+  expect(body).toContain('reference images show the look the reviewer wants');
+  expect(body).toContain('For `region` items');
+  expect(body).toContain('An item with no written request means: make the target match its reference image(s).');
 });
 
 it('returns an error naming the cause when start-up failed', async () => {
