@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { LIMITS, batchReportSchema, batchSchema, renderBatchMarkdown, type BatchStatus, type Session } from '@pickfix/protocol';
+import { BATCH_SCHEMA, LIMITS, batchReportSchema, batchSchema, renderBatchMarkdown, type BatchStatus, type Session } from '@pickfix/protocol';
 import type { BatchRecord, QueueStore } from './queue-store.js';
 import { safePath } from './channel.js';
 import { normalizeSourcePath } from './source-paths.js';
@@ -36,10 +36,15 @@ function compactLine(text: string, max: number): string {
 function claimMarkdown(deps: ToolDeps, record: BatchRecord): ToolResult {
   const { batch } = record;
   const resolveSource = (hint: { file?: string }) => (hint.file ? normalizeSourcePath(hint.file, deps.repoRoot) : undefined);
-  const render = (labels: Map<string, string>) =>
-    renderBatchMarkdown(batch, { repoRoot: deps.repoRoot, resolveSource, screenshotLabel: (item) => labels.get(item.id) });
+  const render = (shots: Map<string, string>, refs: Map<string, string>) =>
+    renderBatchMarkdown(batch, {
+      repoRoot: deps.repoRoot,
+      resolveSource,
+      screenshotLabel: (item) => shots.get(item.id),
+      attachmentLabel: (item, _index, n) => refs.get(`${item.id}#${n}`),
+    });
 
-  const full = render(new Map());
+  const full = render(new Map(), new Map());
   const oversized = full.length > MAX_INLINE_CHARS;
 
   // Claude Code truncates tool output near 25,000 tokens: an oversized batch returns a compact index and a file.
@@ -47,30 +52,40 @@ function claimMarkdown(deps: ToolDeps, record: BatchRecord): ToolResult {
   if (oversized) {
     const header = full.split('\n\n')[0];
     const lines = batch.items.map((item, i) => {
-      const source = item.anchor?.source.file ? resolveSource(item.anchor.source) : undefined;
-      const line = source && item.anchor?.source.line !== undefined ? `:${item.anchor.source.line}` : '';
+      const anchor = item.anchor ?? item.region?.anchors[0];
+      const source = anchor?.source.file ? resolveSource(anchor.source) : undefined;
+      const line = source && anchor?.source.line !== undefined ? `:${anchor.source.line}` : '';
       const where = source ? ` — ${compactLine(source.path, 200)}${line}` : '';
-      return `- Item ${i + 1} · ${item.kind} · ${item.id}: ${compactLine(item.comment, 200)}${where}`;
+      const request = item.comment.trim() ? compactLine(item.comment, 200) : '(reference images only)';
+      return `- Item ${i + 1} · ${item.kind} · ${item.id}: ${request}${where}`;
     });
     compact = `${header}\n\n${lines.join('\n')}`;
   }
   const textLength = oversized ? compact.length + 400 : full.length;
 
+  // Images go in item order: the item's screenshot (current state), then its reference images (desired look).
   const images: Content[] = [];
-  const labels = new Map<string, string>();
-  for (const item of batch.items) {
-    const path = deps.store.screenshotPath(batch.id, item);
-    if (!item.screenshot || !path) continue;
+  const attach = (path: string, read: () => string | undefined, mimeType: string): string => {
     const withinBudget = textLength + (images.length + 1) * IMAGE_COST_CHARS <= MAX_CLAIM_CHARS;
-    if (images.length < MAX_IMAGES_PER_CLAIM && withinBudget) {
-      images.push({ type: 'image', data: deps.store.screenshotBase64(batch.id, item)!, mimeType: item.screenshot.mime });
-      labels.set(item.id, `attached as image ${images.length} (also at ${path})`);
-    } else {
-      labels.set(item.id, `not attached (too many images); read it from ${path}`);
+    const data = images.length < MAX_IMAGES_PER_CLAIM && withinBudget ? read() : undefined;
+    if (data === undefined) return `not attached (too many images); read it from ${path}`;
+    images.push({ type: 'image', data, mimeType });
+    return `attached as image ${images.length} (also at ${path})`;
+  };
+  const shots = new Map<string, string>();
+  const refs = new Map<string, string>();
+  for (const item of batch.items) {
+    const shotPath = deps.store.screenshotPath(batch.id, item);
+    if (item.screenshot && shotPath) {
+      shots.set(item.id, attach(shotPath, () => deps.store.screenshotBase64(batch.id, item), item.screenshot.mime));
     }
+    item.attachments?.forEach((attachment, n) => {
+      const path = deps.store.attachmentPath(batch.id, attachment);
+      if (path) refs.set(`${item.id}#${n}`, attach(path, () => deps.store.attachmentBase64(batch.id, attachment), attachment.mime));
+    });
   }
 
-  const markdown = render(labels);
+  const markdown = render(shots, refs);
   if (!oversized) return { content: [{ type: 'text', text: markdown }, ...images] };
   const filePath = deps.store.writeBatchMarkdown(batch.id, markdown);
   const text = `${compact}\n\nThe full batch with all page data is at ${filePath}. Read it before editing.`;
@@ -130,7 +145,7 @@ export function registerTools(server: McpServer, getDeps: () => Promise<ToolDeps
     {
       title: 'Claim a Pickfix batch',
       description:
-        'Claim a feedback batch before changing any code for it, and receive its items: the reviewer\'s requests, where each element lives in the code, and screenshots. Without batchId, claims the oldest queued batch. A batch can be claimed only once across all sessions.',
+        'Claim a feedback batch before changing any code for it, and receive its items: the reviewer\'s requests, where each element or region lives in the code, screenshots of the current state and any reference images showing the desired look. Without batchId, claims the oldest queued batch. A batch can be claimed only once across all sessions.',
       inputSchema: { batchId: z.string().optional().describe('The batch id from the channel event or pickfix_list_batches.') },
     },
     async ({ batchId }) => {
@@ -206,6 +221,10 @@ export function registerTools(server: McpServer, getDeps: () => Promise<ToolDeps
         data = JSON.parse(readFileSync(file, 'utf8'));
       } catch (e) {
         return error(`Could not read ${file}: ${(e as Error).message}`);
+      }
+      const schema = typeof data === 'object' && data !== null ? (data as { schema?: unknown }).schema : undefined;
+      if (typeof schema === 'string' && schema.startsWith('pickfix.batch/') && schema !== BATCH_SCHEMA) {
+        return error(`${file}: This file was exported by an older Pickfix. Export it again with the current extension.`);
       }
       const parsed = batchSchema.safeParse(data);
       if (!parsed.success) return error(`${file} is not a Pickfix batch export. ${z.prettifyError(parsed.error).slice(0, 800)}`);

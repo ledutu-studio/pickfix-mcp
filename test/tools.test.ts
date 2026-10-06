@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Session } from '@pickfix/protocol';
 import { QueueStore } from '../src/queue-store.js';
 import type { ToolDeps } from '../src/tools.js';
-import { makeBatch, makeElementItem, PNG_1PX } from '../packages/protocol/test/fixtures.js';
+import { makeAttachment, makeBatch, makeElementItem, makeRegionItem, PNG_1PX } from '../packages/protocol/test/fixtures.js';
 import { tempDir, tempHome } from './helpers.js';
 import { startMcp, text } from './mcp-harness.js';
 
@@ -117,6 +117,38 @@ describe('pickfix_claim_batch', () => {
       await other.close();
     }
   });
+  it('attaches the screenshot, then the reference images, each labelled', async () => {
+    const item = { ...makeRegionItem('item-1'), attachments: [makeAttachment('a.png'), makeAttachment('b.png')] };
+    deps.store.add(makeBatch({ items: [item] }), 's');
+    const result = (await call('pickfix_claim_batch')) as { content: { type: string }[] };
+    const md = text(result);
+    expect(result.content.filter((c) => c.type === 'image')).toHaveLength(3);
+    expect(md).toMatch(/\*\*Screenshot \(current state\):\*\* attached as image 1 \(also at \S+item-1\.png\)/);
+    expect(md).toMatch(/1\. attached as image 2 \(also at \S+item-1-ref-1\.png\)\n2\. attached as image 3 \(also at \S+item-1-ref-2\.png\)/);
+  });
+
+  it('attaches at most eight images in item order and points to the rest on disk', async () => {
+    const items = [1, 2, 3].map((n) => ({
+      ...makeElementItem(`item-${n}`),
+      attachments: [makeAttachment('a.png'), makeAttachment('b.png'), makeAttachment('c.png')],
+    }));
+    deps.store.add(makeBatch({ items }), 's');
+    const result = (await call('pickfix_claim_batch')) as { content: { type: string }[] };
+    const md = text(result);
+    expect(result.content.filter((c) => c.type === 'image')).toHaveLength(8);
+    expect(md).toMatch(/3\. attached as image 8 \(also at \S+item-2-ref-3\.png\)/);
+    expect(md).toMatch(/\*\*Screenshot \(current state\):\*\* not attached \(too many images\); read it from \S+item-3\.png/);
+    expect(md).toMatch(/1\. not attached \(too many images\); read it from \S+item-3-ref-1\.png/);
+  });
+
+  it('skips a reference image whose file is gone without failing the claim', async () => {
+    const { record } = deps.store.add(makeBatch({ items: [{ ...makeElementItem(), attachments: [makeAttachment()] }] }), 's');
+    rmSync(deps.store.attachmentPath('batch-1', record.batch.items[0]!.attachments![0]!)!);
+    const result = (await call('pickfix_claim_batch')) as { content: { type: string }[]; isError?: boolean };
+    expect(result.isError).toBeFalsy();
+    expect(result.content.filter((c) => c.type === 'image')).toHaveLength(1);
+    expect(text(result)).toContain('1. included in the batch file');
+  });
 });
 
 describe('pickfix_claim_batch size budget', () => {
@@ -142,6 +174,15 @@ describe('pickfix_claim_batch size budget', () => {
     expect(full.length).toBeGreaterThan(60_000);
     expect(full).toContain('## Item 50 of 50');
     expect(result.content.filter((c) => c.type === 'image').length).toBeLessThanOrEqual(8);
+  });
+
+  it('names region and image-only items in the compact index, even a region with no elements', async () => {
+    const batch = bigBatch();
+    const region = makeRegionItem('item-1');
+    batch.items[0] = { ...region, comment: '', attachments: [makeAttachment()], region: { ...region.region!, anchors: [] } };
+    deps.store.add(batch, 's');
+    const out = text(await call('pickfix_claim_batch'));
+    expect(out).toContain('- Item 1 · region · item-1: (reference images only)');
   });
 
   it('leaves a small batch unchanged', async () => {
@@ -184,6 +225,15 @@ describe('pickfix_import', () => {
     writeFileSync(file, JSON.stringify(makeBatch({ id: 'imported' })));
     expect(text(await call('pickfix_import', { path: 'pickfix-export.json' }))).toContain('Imported batch imported with 1 item');
     expect(deps.store.readState('imported')?.status).toBe('queued');
+  });
+
+  it('tells the user to export again when the file comes from an older Pickfix', async () => {
+    const file = join(deps.repoRoot, 'old.json');
+    writeFileSync(file, JSON.stringify({ ...makeBatch({ id: 'old' }), schema: 'pickfix.batch/1' }));
+    const result = (await call('pickfix_import', { path: file })) as { isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain('This file was exported by an older Pickfix. Export it again with the current extension.');
+    expect(deps.store.readState('old')).toBeUndefined();
   });
 
   it('explains an invalid file', async () => {

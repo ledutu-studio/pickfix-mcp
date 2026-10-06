@@ -41378,17 +41378,24 @@ function compactLine(text, max) {
 function claimMarkdown(deps, record2) {
   const { batch } = record2;
   const resolveSource = (hint) => hint.file ? normalizeSourcePath(hint.file, deps.repoRoot) : void 0;
-  const render = (labels2) => renderBatchMarkdown(batch, { repoRoot: deps.repoRoot, resolveSource, screenshotLabel: (item) => labels2.get(item.id) });
-  const full = render(/* @__PURE__ */ new Map());
+  const render = (shots2, refs2) => renderBatchMarkdown(batch, {
+    repoRoot: deps.repoRoot,
+    resolveSource,
+    screenshotLabel: (item) => shots2.get(item.id),
+    attachmentLabel: (item, _index, n) => refs2.get(`${item.id}#${n}`)
+  });
+  const full = render(/* @__PURE__ */ new Map(), /* @__PURE__ */ new Map());
   const oversized = full.length > MAX_INLINE_CHARS;
   let compact = "";
   if (oversized) {
     const header = full.split("\n\n")[0];
     const lines = batch.items.map((item, i) => {
-      const source = item.anchor?.source.file ? resolveSource(item.anchor.source) : void 0;
-      const line = source && item.anchor?.source.line !== void 0 ? `:${item.anchor.source.line}` : "";
+      const anchor2 = item.anchor ?? item.region?.anchors[0];
+      const source = anchor2?.source.file ? resolveSource(anchor2.source) : void 0;
+      const line = source && anchor2?.source.line !== void 0 ? `:${anchor2.source.line}` : "";
       const where = source ? ` \u2014 ${compactLine(source.path, 200)}${line}` : "";
-      return `- Item ${i + 1} \xB7 ${item.kind} \xB7 ${item.id}: ${compactLine(item.comment, 200)}${where}`;
+      const request = item.comment.trim() ? compactLine(item.comment, 200) : "(reference images only)";
+      return `- Item ${i + 1} \xB7 ${item.kind} \xB7 ${item.id}: ${request}${where}`;
     });
     compact = `${header}
 
@@ -41396,19 +41403,26 @@ ${lines.join("\n")}`;
   }
   const textLength = oversized ? compact.length + 400 : full.length;
   const images = [];
-  const labels = /* @__PURE__ */ new Map();
-  for (const item of batch.items) {
-    const path = deps.store.screenshotPath(batch.id, item);
-    if (!item.screenshot || !path) continue;
+  const attach = (path, read, mimeType) => {
     const withinBudget = textLength + (images.length + 1) * IMAGE_COST_CHARS <= MAX_CLAIM_CHARS;
-    if (images.length < MAX_IMAGES_PER_CLAIM && withinBudget) {
-      images.push({ type: "image", data: deps.store.screenshotBase64(batch.id, item), mimeType: item.screenshot.mime });
-      labels.set(item.id, `attached as image ${images.length} (also at ${path})`);
-    } else {
-      labels.set(item.id, `not attached (too many images); read it from ${path}`);
+    const data = images.length < MAX_IMAGES_PER_CLAIM && withinBudget ? read() : void 0;
+    if (data === void 0) return `not attached (too many images); read it from ${path}`;
+    images.push({ type: "image", data, mimeType });
+    return `attached as image ${images.length} (also at ${path})`;
+  };
+  const shots = /* @__PURE__ */ new Map();
+  const refs = /* @__PURE__ */ new Map();
+  for (const item of batch.items) {
+    const shotPath = deps.store.screenshotPath(batch.id, item);
+    if (item.screenshot && shotPath) {
+      shots.set(item.id, attach(shotPath, () => deps.store.screenshotBase64(batch.id, item), item.screenshot.mime));
     }
+    item.attachments?.forEach((attachment, n) => {
+      const path = deps.store.attachmentPath(batch.id, attachment);
+      if (path) refs.set(`${item.id}#${n}`, attach(path, () => deps.store.attachmentBase64(batch.id, attachment), attachment.mime));
+    });
   }
-  const markdown = render(labels);
+  const markdown = render(shots, refs);
   if (!oversized) return { content: [{ type: "text", text: markdown }, ...images] };
   const filePath = deps.store.writeBatchMarkdown(batch.id, markdown);
   const text = `${compact}
@@ -41464,7 +41478,7 @@ function registerTools(server, getDeps) {
     "pickfix_claim_batch",
     {
       title: "Claim a Pickfix batch",
-      description: "Claim a feedback batch before changing any code for it, and receive its items: the reviewer's requests, where each element lives in the code, and screenshots. Without batchId, claims the oldest queued batch. A batch can be claimed only once across all sessions.",
+      description: "Claim a feedback batch before changing any code for it, and receive its items: the reviewer's requests, where each element or region lives in the code, screenshots of the current state and any reference images showing the desired look. Without batchId, claims the oldest queued batch. A batch can be claimed only once across all sessions.",
       inputSchema: { batchId: external_exports.string().optional().describe("The batch id from the channel event or pickfix_list_batches.") }
     },
     async ({ batchId }) => {
@@ -41534,6 +41548,10 @@ function registerTools(server, getDeps) {
         data = JSON.parse(readFileSync3(file2, "utf8"));
       } catch (e) {
         return error62(`Could not read ${file2}: ${e.message}`);
+      }
+      const schema = typeof data === "object" && data !== null ? data.schema : void 0;
+      if (typeof schema === "string" && schema.startsWith("pickfix.batch/") && schema !== BATCH_SCHEMA) {
+        return error62(`${file2}: This file was exported by an older Pickfix. Export it again with the current extension.`);
       }
       const parsed = batchSchema.safeParse(data);
       if (!parsed.success) return error62(`${file2} is not a Pickfix batch export. ${external_exports.prettifyError(parsed.error).slice(0, 800)}`);
