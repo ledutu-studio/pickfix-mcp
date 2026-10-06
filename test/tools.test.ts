@@ -85,7 +85,7 @@ describe('pickfix_claim_batch', () => {
     const md = text(result);
     expect(md).toContain('# Pickfix batch batch-1');
     expect(md).toContain('`src/components/CheckoutSummary.tsx:88:7`');
-    expect(md).toContain('**Screenshot:** attached as image 1');
+    expect(md).toContain('**Screenshot (current state):** attached as image 1 (also at');
     expect(result.content.find((c) => c.type === 'image')).toMatchObject({ data: PNG_1PX, mimeType: 'image/png' });
     expect(deps.store.readState('batch-1')?.status).toBe('working');
     expect(changed).toEqual(['batch-1']);

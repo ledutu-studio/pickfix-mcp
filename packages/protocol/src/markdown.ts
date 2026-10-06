@@ -1,8 +1,8 @@
 import { UNTRUSTED_NOTICE } from './constants.js';
 import type { Batch, FlowStep, Item, SourceHint } from './schemas.js';
 
-/** An item whose screenshot may be stored elsewhere; only its presence matters here. */
-export type RenderableItem = Omit<Item, 'screenshot'> & { screenshot?: object };
+/** An item whose images may be stored elsewhere; only their presence matters here. */
+export type RenderableItem = Omit<Item, 'screenshot' | 'attachments'> & { screenshot?: object; attachments?: object[] };
 export type RenderableBatch = Omit<Batch, 'items'> & { items: RenderableItem[] };
 
 export type RenderOptions = {
@@ -12,7 +12,12 @@ export type RenderOptions = {
   resolveSource?: (hint: SourceHint) => { path: string; found: boolean } | undefined;
   /** How the item's screenshot reaches the reader, e.g. "attached as image 1". */
   screenshotLabel?(item: RenderableItem, index: number): string | undefined;
+  /** How one reference image reaches the reader, e.g. "attached as image 2". */
+  attachmentLabel?(item: RenderableItem, itemIndex: number, attachmentIndex: number): string | undefined;
 };
+
+/** What Claude is asked to do when the reviewer attached images but wrote nothing. */
+export const NO_COMMENT_REQUEST = 'The reviewer wrote no description. Make the target match the attached reference image(s).';
 
 /** Slices can split a surrogate pair; the model API rejects unpaired surrogates. */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
@@ -92,6 +97,15 @@ function describeStep(step: FlowStep): string {
 
 function pageData(item: RenderableItem): string {
   const lines: string[] = [`Page title: ${item.page.title}`];
+  if (item.viewport) lines.push(`Viewport when captured: ${item.viewport.width}×${item.viewport.height} @${item.viewport.dpr}x`);
+  if (item.region) {
+    const { x, y, width, height } = item.region.rect;
+    lines.push(`Region: ${Math.round(x)},${Math.round(y)} ${Math.round(width)}×${Math.round(height)}`);
+    item.region.anchors.forEach((anchor, i) => {
+      const text = anchor.text ? ` "${anchor.text.slice(0, 80)}"` : '';
+      lines.push(`Region element ${i + 1}: <${anchor.tag}> ${anchor.selector}${text}`);
+    });
+  }
   const a = item.anchor;
   if (a) {
     lines.push(`Element: <${a.tag}>`, `Selector: ${a.selector}`);
@@ -117,7 +131,8 @@ function pageData(item: RenderableItem): string {
 
 function renderItem(item: RenderableItem, index: number, total: number, options: RenderOptions): string {
   const parts: string[] = [`## Item ${index + 1} of ${total} · ${item.kind} · \`${item.id}\``];
-  parts.push(`**${item.kind === 'flow' ? 'Workflow title' : "Reviewer's request"}:**\n${quote(item.comment)}`);
+  const request = item.comment.trim() ? quote(item.comment) : NO_COMMENT_REQUEST;
+  parts.push(`**${item.kind === 'flow' ? 'Workflow title' : "Reviewer's request"}:**\n${request}`);
   if (item.textEdit) parts.push(`**Requested text (after):**\n${quote(item.textEdit.after)}`);
   if (item.flow) {
     if (item.flow.expected) parts.push(`**Expected:**\n${quote(item.flow.expected)}`);
@@ -125,10 +140,21 @@ function renderItem(item: RenderableItem, index: number, total: number, options:
   }
   const where: string[] = [`- Page: ${inline(item.page.url, 500)} (route ${inline(item.page.path, 300)})`];
   if (item.anchor) where.push(...sourceLines(item.anchor.source, options));
+  if (item.region) {
+    item.region.anchors.forEach((anchor, i) => {
+      where.push(`- Element ${i + 1} in the region: <${inline(anchor.tag, 50)}>`);
+      where.push(...sourceLines(anchor.source, options).map((line) => `  ${line}`));
+    });
+    if (item.region.anchors.length === 0) where.push('- No element lies fully inside the region; use the screenshot and the route.');
+  }
   parts.push(`**Where in the code:**\n${where.join('\n')}`);
   if (item.screenshot) {
     const label = options.screenshotLabel?.(item, index) ?? 'included in the batch file';
-    parts.push(`**Screenshot:** ${label}`);
+    parts.push(`**Screenshot (current state):** ${label}`);
+  }
+  if (item.attachments?.length) {
+    const labels = item.attachments.map((_, n) => `${n + 1}. ${options.attachmentLabel?.(item, index, n) ?? 'included in the batch file'}`);
+    parts.push(`**Reference images (desired look, provided by the reviewer):**\n${labels.join('\n')}`);
   }
   parts.push(`${UNTRUSTED_NOTICE}\n\n${pageData(item)}`);
   return parts.join('\n\n');

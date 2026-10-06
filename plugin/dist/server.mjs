@@ -40430,6 +40430,7 @@ function encodeMessage(message) {
 }
 
 // packages/protocol/src/markdown.ts
+var NO_COMMENT_REQUEST = "The reviewer wrote no description. Make the target match the attached reference image(s).";
 var LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 var COMPONENT_NAME = /^[A-Za-z0-9_$.:@<>-]{1,200}$/;
 function inline(text, max) {
@@ -40490,6 +40491,15 @@ function describeStep(step) {
 }
 function pageData(item) {
   const lines = [`Page title: ${item.page.title}`];
+  if (item.viewport) lines.push(`Viewport when captured: ${item.viewport.width}\xD7${item.viewport.height} @${item.viewport.dpr}x`);
+  if (item.region) {
+    const { x, y, width, height } = item.region.rect;
+    lines.push(`Region: ${Math.round(x)},${Math.round(y)} ${Math.round(width)}\xD7${Math.round(height)}`);
+    item.region.anchors.forEach((anchor2, i) => {
+      const text = anchor2.text ? ` "${anchor2.text.slice(0, 80)}"` : "";
+      lines.push(`Region element ${i + 1}: <${anchor2.tag}> ${anchor2.selector}${text}`);
+    });
+  }
   const a = item.anchor;
   if (a) {
     lines.push(`Element: <${a.tag}>`, `Selector: ${a.selector}`);
@@ -40516,8 +40526,9 @@ ${fence(a.html.slice(0, 2e3), "html")}`;
 }
 function renderItem(item, index, total, options) {
   const parts = [`## Item ${index + 1} of ${total} \xB7 ${item.kind} \xB7 \`${item.id}\``];
+  const request = item.comment.trim() ? quote(item.comment) : NO_COMMENT_REQUEST;
   parts.push(`**${item.kind === "flow" ? "Workflow title" : "Reviewer's request"}:**
-${quote(item.comment)}`);
+${request}`);
   if (item.textEdit) parts.push(`**Requested text (after):**
 ${quote(item.textEdit.after)}`);
   if (item.flow) {
@@ -40528,11 +40539,23 @@ ${quote(item.flow.actual)}`);
   }
   const where = [`- Page: ${inline(item.page.url, 500)} (route ${inline(item.page.path, 300)})`];
   if (item.anchor) where.push(...sourceLines(item.anchor.source, options));
+  if (item.region) {
+    item.region.anchors.forEach((anchor2, i) => {
+      where.push(`- Element ${i + 1} in the region: <${inline(anchor2.tag, 50)}>`);
+      where.push(...sourceLines(anchor2.source, options).map((line) => `  ${line}`));
+    });
+    if (item.region.anchors.length === 0) where.push("- No element lies fully inside the region; use the screenshot and the route.");
+  }
   parts.push(`**Where in the code:**
 ${where.join("\n")}`);
   if (item.screenshot) {
     const label = options.screenshotLabel?.(item, index) ?? "included in the batch file";
-    parts.push(`**Screenshot:** ${label}`);
+    parts.push(`**Screenshot (current state):** ${label}`);
+  }
+  if (item.attachments?.length) {
+    const labels = item.attachments.map((_, n) => `${n + 1}. ${options.attachmentLabel?.(item, index, n) ?? "included in the batch file"}`);
+    parts.push(`**Reference images (desired look, provided by the reviewer):**
+${labels.join("\n")}`);
   }
   parts.push(`${UNTRUSTED_NOTICE}
 

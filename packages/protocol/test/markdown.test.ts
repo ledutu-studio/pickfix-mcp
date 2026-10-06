@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { UNTRUSTED_NOTICE, fence, renderBatchMarkdown, type Item } from '../src/index.js';
-import { makeBatch, makeElementItem } from './fixtures.js';
+import { NO_COMMENT_REQUEST, UNTRUSTED_NOTICE, fence, renderBatchMarkdown, type Item } from '../src/index.js';
+import { makeAttachment, makeBatch, makeElementItem, makeRegionItem } from './fixtures.js';
 
 describe('fence', () => {
   it('uses a fence longer than any backtick run inside', () => {
@@ -129,9 +129,56 @@ describe('renderBatchMarkdown', () => {
     expect(md).toContain('2. [/checkout] network POST /api/orders → 500  ← FAILING STEP');
   });
 
-  it('uses the screenshot label when given', () => {
+  it('labels the screenshot as the current state, with the label when given', () => {
     const md = renderBatchMarkdown(makeBatch(), { screenshotLabel: (_item, i) => `attached as image ${i + 1}` });
-    expect(md).toContain('**Screenshot:** attached as image 1');
+    expect(md).toContain('**Screenshot (current state):** attached as image 1');
+  });
+
+  it('lists reference images separately with their labels', () => {
+    const item = { ...makeElementItem(), attachments: [makeAttachment('a.png'), makeAttachment('b.png')] };
+    const md = renderBatchMarkdown(makeBatch({ items: [item] }), {
+      attachmentLabel: (_item, itemIndex, n) => `attached as image ${itemIndex + n + 2}`,
+    });
+    expect(md).toContain(
+      '**Reference images (desired look, provided by the reviewer):**\n1. attached as image 2\n2. attached as image 3',
+    );
+  });
+
+  it('falls back to "included in the batch file" for reference images without a label', () => {
+    const item = { ...makeElementItem(), attachments: [makeAttachment()] };
+    expect(renderBatchMarkdown(makeBatch({ items: [item] }))).toContain(
+      '**Reference images (desired look, provided by the reviewer):**\n1. included in the batch file',
+    );
+  });
+
+  it('asks Claude to match the reference when the reviewer wrote nothing', () => {
+    const item = { ...makeElementItem(), comment: '', attachments: [makeAttachment()] };
+    const md = renderBatchMarkdown(makeBatch({ items: [item] }));
+    expect(md).toContain(`**Reviewer's request:**\n${NO_COMMENT_REQUEST}`);
+    expect(md).not.toMatch(/\*\*Reviewer's request:\*\*\n> \n/);
+  });
+
+  it('records the viewport each item was captured in', () => {
+    const item = { ...makeElementItem(), viewport: { width: 390, height: 844, dpr: 3 } };
+    expect(renderBatchMarkdown(makeBatch({ items: [item] }))).toContain('Viewport when captured: 390×844 @3x');
+  });
+
+  it('renders a region: its elements under "Where in the code" and the rectangle in the page data', () => {
+    const md = renderBatchMarkdown(makeBatch({ items: [makeRegionItem()] }), {
+      resolveSource: () => ({ path: 'src/components/CheckoutSummary.tsx', found: true }),
+    });
+    expect(md).toContain('## Item 1 of 1 · region · `region-1`');
+    expect(md).toContain('- Element 1 in the region: <button>');
+    expect(md).toContain('  - Source: `src/components/CheckoutSummary.tsx:88:7` (confidence: exact, via react-fiber)');
+    const notice = md.indexOf(UNTRUSTED_NOTICE);
+    expect(md.indexOf('Region: 40,120 600×320')).toBeGreaterThan(notice);
+    expect(md).toContain('Region element 1: <button> main > section.summary > button.btn "Place order"');
+  });
+
+  it('says so when no element lies fully inside the region', () => {
+    const item = makeRegionItem();
+    const md = renderBatchMarkdown(makeBatch({ items: [{ ...item, region: { ...item.region!, anchors: [] } }] }));
+    expect(md).toContain('- No element lies fully inside the region; use the screenshot and the route.');
   });
 
   it('ends with the reporting instruction', () => {
