@@ -41588,7 +41588,7 @@ function registerTools(server, getDeps) {
 }
 
 // src/version.ts
-var SERVER_VERSION = "1.2.0";
+var SERVER_VERSION = "1.2.1";
 
 // src/server.ts
 async function main() {
