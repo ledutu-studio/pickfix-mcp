@@ -154,8 +154,17 @@ The extension's id is its Chrome Web Store item id, `eehanlcaccamfaalnfcikkdneff
 
 ## Release
 
+From your machine, once `main` is pushed and CI passed:
+
+```bash
+pnpm release --dry-run    # checks, starts nothing
+pnpm release minor        # patch (default) | minor | major; asks, then starts publish.yml and follows it
+```
+
+`pnpm release` refuses a `main` whose CI did not pass (it skips `[skip ci]` release commits when looking), local commits that are not pushed, a release already running, a `main` with nothing new since the last tag, and a version npm already has. It never changes the version itself; the workflow below does. To ship this and the extension together, in the right order (this server first), run `pnpm release` in the **pickfix** repository (`ledutu-studio/pickfix`, the folder that holds both checkouts); its `docs/release.md` has the whole flow.
+
 - `.github/workflows/ci.yml` runs on every push to `main` and every pull request: type-check, unit tests (which also check that `plugin/dist` is fresh) and the end-to-end tests.
-- `.github/workflows/publish.yml` runs only when started by hand (Actions → publish → Run workflow) from `main`. It bumps the version (`patch` by default, or `minor`/`major`) in `package.json`, `plugin/.claude-plugin/plugin.json` and `src/version.ts`, runs the checks, rebuilds `plugin/dist`, publishes to npm, then commits `chore(release): <version>` and tags `v<version>`. Do not change the version by hand.
+- `.github/workflows/publish.yml` runs only when started by hand (`pnpm release`, or Actions → publish → Run workflow) from `main`. It bumps the version (`patch` by default, or `minor`/`major`) in `package.json`, `plugin/.claude-plugin/plugin.json` and `src/version.ts`, runs the checks, rebuilds `plugin/dist`, publishes to npm, then commits `chore(release): <version>` and tags `v<version>`. Do not change the version by hand.
 - npm accepts the upload through [trusted publishing](https://docs.npmjs.com/trusted-publishers), so no npm token is stored. One-time setup on npmjs.com: `pickfix-mcp` → Settings → Trusted publisher → GitHub Actions, repository `ledutu-studio/pickfix-mcp`, workflow `publish.yml`.
 - Optional secret `DISCORD_WEBHOOK_URL` posts the result to Discord.
 - Claude Code plugin users do not wait for npm: the marketplace reads `plugin/` from `main`.
@@ -178,6 +187,8 @@ Pickfix giúp dev frontend, QA và PM chỉ vào chỗ sai trên giao diện đa
 **Kết nối thủ công bằng port:** nếu panel không tự tìm thấy phiên (extension chỉ dò các port 47400–47409), chạy tool `pickfix_status` trong Claude Code để xem port (dòng `ws://127.0.0.1:<port>/pickfix`), rồi trong panel chọn **Kết nối thủ công**, nhập port và bấm **Kết nối**. Extension nhớ port này (tối đa 5 port gần nhất) và tự kết nối lại khi phiên khởi động lại. Muốn server chạy trên một port cố định, đặt biến môi trường `PICKFIX_PORT` (1024–65535), ví dụ `PICKFIX_PORT=51234 claude`; với file cấu hình `mcpServers` thì thêm `"env": { "PICKFIX_PORT": "51234" }`. Nếu port đó đang bị dùng, server không tự chọn port khác: `pickfix_status` sẽ báo lỗi để bạn đổi port.
 
 Muốn Claude tự sửa ngay khi nhận feedback, mở Claude bằng `claude --dangerously-load-development-channels plugin:pickfix@pickfix`. Không dùng cờ này thì gõ `/pickfix:fix` khi panel hiện **Đang chờ**. Giao diện extension có tiếng Việt và tiếng Anh, đổi trong phần cài đặt của extension.
+
+**Phát hành phiên bản mới:** sau khi push lên `main` và CI xanh, chạy `pnpm release minor` (hoặc `patch`, `major`; thêm `--dry-run` để chỉ kiểm tra). Script kiểm tra CI, commit chưa push, rồi chạy workflow `publish.yml` (bump version, đẩy lên npm, tag) và theo dõi tới khi xong. Không sửa version bằng tay. Muốn phát hành cả extension, chạy `pnpm release` trong repo **pickfix** (thư mục chứa cả hai repo; MCP trước, extension sau).
 
 Cursor, Codex và các agent khác: thêm MCP server chạy `npx -y pickfix-mcp` (xem cấu hình ở trên). Chính sách quyền riêng tư: [PRIVACY.md](PRIVACY.md).
 
