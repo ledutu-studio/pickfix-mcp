@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { listenOnFirstFree } from '../src/port-binder.js';
+import { PORTS } from '@pickfix/protocol';
+import { listenOnFirstFree, portChoice } from '../src/port-binder.js';
 import { freePorts } from './net-helpers.js';
 
 const open: { close(): void }[] = [];
@@ -25,5 +26,20 @@ describe('listenOnFirstFree', () => {
     open.push(blocker);
     await new Promise((r) => blocker.once('listening', r));
     expect(await listenOnFirstFree(() => createServer(), [busy!])).toBeNull();
+  });
+});
+
+describe('portChoice', () => {
+  it('uses the default range when PICKFIX_PORT is not set', () => {
+    expect(portChoice({})).toEqual({ ports: PORTS, fixed: null });
+    expect(portChoice({ PICKFIX_PORT: '  ' })).toEqual({ ports: PORTS, fixed: null });
+  });
+
+  it('takes only PICKFIX_PORT when it is set', () => {
+    expect(portChoice({ PICKFIX_PORT: ' 51234 ' })).toEqual({ ports: [51234], fixed: 51234 });
+  });
+
+  it.each(['abc', '80', '70000', '4740.5', '-1'])('refuses PICKFIX_PORT=%s', (value) => {
+    expect(() => portChoice({ PICKFIX_PORT: value })).toThrow('PICKFIX_PORT must be a port number from 1024 to 65535');
   });
 });

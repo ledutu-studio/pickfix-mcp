@@ -5,6 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { afterEach, describe, expect, it } from 'vitest';
 import { makeAttachment, makeBatch, makeRegionItem } from '../../packages/protocol/test/fixtures.js';
 import { tempDir, tempHome } from '../helpers.js';
+import { freePorts } from '../net-helpers.js';
 import { connect as rawConnect, rejectedStatus, type TestClient } from '../ws-client.js';
 
 const SERVER = resolve('plugin/dist/server.mjs');
@@ -38,12 +39,12 @@ afterEach(async () => {
 const textOf = (result: unknown) =>
   (result as { content: { type: string; text?: string }[] }).content.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
 
-async function startAgent(home: string, repo: string): Promise<Agent> {
+async function startAgent(home: string, repo: string, env: Record<string, string> = {}): Promise<Agent> {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [SERVER],
     cwd: repo,
-    env: { ...(process.env as Record<string, string>), PICKFIX_HOME: home, PICKFIX_EXTENSION_IDS: DEV_ID },
+    env: { ...(process.env as Record<string, string>), PICKFIX_HOME: home, PICKFIX_EXTENSION_IDS: DEV_ID, ...env },
     stderr: 'ignore',
   });
   const client = new Client({ name: 'e2e-agent', version: '1.0.0' });
@@ -146,6 +147,15 @@ describe('pickfix-mcp end to end', () => {
     const second = await startAgent(home, repo);
     expect(second.port).not.toBe(first.port);
     expect(textOf(await second.client.callTool({ name: 'pickfix_list_batches', arguments: {} }))).toContain('batch-1 · queued');
+  });
+
+  it('listens on PICKFIX_PORT when it is set, outside the scanned range', async () => {
+    const [port] = await freePorts(1);
+    const agent = await startAgent(tempHome(), realpathSync(tempDir()), { PICKFIX_PORT: String(port) });
+    expect(agent.port).toBe(port);
+    const status = textOf(await agent.client.callTool({ name: 'pickfix_status', arguments: {} }));
+    expect(status).toContain(`enter port ${port}`);
+    await connectedExtension(agent);
   });
 
   it('re-queues a batch whose session died mid-fix and announces it to the next session', async () => {

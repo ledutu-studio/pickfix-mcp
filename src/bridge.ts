@@ -68,6 +68,8 @@ export async function startBridge(deps: BridgeDeps, ports: readonly number[] = P
   const log = deps.log ?? defaultLog;
   const bound = await listenOnFirstFree(
     () =>
+      // Plain HTTP gets an empty 404, without CORS headers. The extension relies on any answer here: it sends
+      // `HEAD /` to see whether a port listens before it opens a WebSocket (a refused WebSocket makes Chrome slow down).
       createServer((_req, res) => {
         res.writeHead(404).end();
       }),

@@ -98,7 +98,7 @@ export function registerTools(server: McpServer, getDeps: () => Promise<ToolDeps
     'pickfix_status',
     {
       title: 'Pickfix status',
-      description: 'Show this session\'s Pickfix link: repository, WebSocket port (or why there is none), and how many feedback batches are in each state.',
+      description: 'Show this session\'s Pickfix link: repository, WebSocket port (or why there is none), and how many feedback batches are in each state. The reviewer can enter the port under Connect manually in the Pickfix panel.',
       annotations: { readOnlyHint: true },
     },
     async () => {
@@ -112,6 +112,7 @@ export function registerTools(server: McpServer, getDeps: () => Promise<ToolDeps
           `Pickfix session for ${deps.session.name} (${deps.repoRoot})`,
           `Agent: ${deps.session.agent} · session ${deps.session.sessionId}`,
           link.port ? `Extension link: listening on ws://127.0.0.1:${link.port}/pickfix` : `Extension link: not available. ${link.reason ?? ''}`.trim(),
+          ...(link.port ? [`If the extension does not find this session, choose Connect manually in the Pickfix panel and enter port ${link.port}.`] : []),
           `Batches: ${countText}`,
         ].join('\n'),
       );

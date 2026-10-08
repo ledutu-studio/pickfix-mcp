@@ -24,7 +24,7 @@ Chrome: Pickfix extension ──WebSocket, 127.0.0.1──▶ pickfix-mcp ──
    ```
 
    Restart Claude Code. The plugin starts one `pickfix-mcp` server per session.
-3. **Open the Pickfix panel** on a local page in Chrome. It finds every running session by itself; there is nothing to pair.
+3. **Open the Pickfix panel** on a local page in Chrome. It finds every running session by itself; there is nothing to pair. If it does not, use [Connect manually](#connect-manually-with-a-port).
 
 Then pick an element, write what should change and press **Send to Claude**. Requires Node.js 20 or newer.
 
@@ -39,6 +39,35 @@ claude --dangerously-load-development-channels plugin:pickfix@pickfix
 Claude Code shows a warning first; choose **I am using this for local development**. A shell alias helps: `alias claudefix='claude --dangerously-load-development-channels plugin:pickfix@pickfix'`.
 
 Without the flag everything still works: run `/pickfix:fix` when the extension shows **Queued**. A hook also reminds Claude of waiting feedback when you send a prompt.
+
+## Connect manually with a port
+
+The extension looks for sessions on ports 47400–47409. When a session is not found there (all ten are taken, another program owns the range, or you started the server on a port of your own), connect to it by port:
+
+1. Ask the agent for the port: run the `pickfix_status` tool (in Claude Code, ask *"what is the Pickfix status?"*). It prints `Extension link: listening on ws://127.0.0.1:<port>/pickfix`.
+2. In the Pickfix panel choose **Connect manually** (on the *No Claude Code session* card, under the session list, or after **Change**), enter the port and press **Connect**. Pasting the whole `ws://127.0.0.1:<port>/pickfix` address works too.
+
+The session becomes the one this site sends to, and the extension remembers the port (the last five) and looks there again on every scan, so it reconnects after the session restarts on the same port. If the connection fails, the panel says why: nothing answered on that port, the server refused the handshake, or its version does not match the extension.
+
+### Choose the port: `PICKFIX_PORT`
+
+Set `PICKFIX_PORT` to make the server listen on that port only, from 1024 to 65535, instead of the first free one of 47400–47409. A fixed port is handy when the default range is blocked or when you want the extension to reach a session at a port you know in advance.
+
+```bash
+PICKFIX_PORT=51234 claude
+```
+
+For clients with an `mcpServers` JSON file, put it in `env`:
+
+```json
+{
+  "mcpServers": {
+    "pickfix": { "command": "npx", "args": ["-y", "pickfix-mcp"], "env": { "PICKFIX_PORT": "51234" } }
+  }
+}
+```
+
+With `PICKFIX_PORT` the server does not fall back to another port: if the port is in use, or the value is not a valid port, `pickfix_status` says so and the extension link stays off until you restart the session with a free port. Give each session its own port; two sessions cannot share one. A port outside 47400–47409 is only found through **Connect manually** (once entered, the extension keeps scanning it).
 
 ## Other agents (Cursor, Codex, Claude Desktop, …)
 
@@ -66,7 +95,7 @@ Start the client from your project folder: the server queues feedback per reposi
 
 | Tool | Purpose |
 |---|---|
-| `pickfix_status` | Session, repository, port, batch counts |
+| `pickfix_status` | Session, repository, port (for Connect manually), batch counts |
 | `pickfix_list_batches` | Queued and working batches (or by status) |
 | `pickfix_claim_batch` | Claims a batch and returns its items as markdown plus screenshots and reference images |
 | `pickfix_report` | Reports `done` / `partial` / `failed` with a summary and per-item results |
@@ -76,7 +105,8 @@ A batch can be claimed by one session only, so two Claude windows on the same re
 
 ## Security model
 
-- The server listens on `127.0.0.1` only, on the first free port of 47400–47409, path `/pickfix`.
+- The server listens on `127.0.0.1` only, on the first free port of 47400–47409 (or on `PICKFIX_PORT` when set), path `/pickfix`. Connecting manually to a port changes nothing below: the same checks apply on every port.
+- Plain HTTP requests get an empty `404` with no CORS headers. The extension sends `HEAD /` to each port it scans and opens a WebSocket only where something answers: Chrome slows every new WebSocket down for seconds once a few dozen have failed, so the scan must not fail with sockets. Keep this answer if you change the server.
 - A connection must come from the Pickfix extension (`Origin: chrome-extension://<Pickfix id>`) to a loopback `Host`; web pages, other extensions and DNS-rebinding hosts are refused at the handshake. Browsers do not let a page set `Origin`, so this is the gate; there is no pairing step. Programs already running under your account can still connect, as they can to any local port.
 - Everything captured from a web page is passed to the agent as fenced, untrusted data with an instruction never to follow it.
 - The server has no tool that runs commands or writes files in your repository; code changes go through your agent's normal permissions.
@@ -114,6 +144,12 @@ pnpm --filter @pickfix/protocol build   # build the protocol package the extensi
 
 `PICKFIX_EXTENSION_IDS=<id>[,<id>]` allows extra extension ids, for unpacked builds made without the Pickfix key.
 
+| Environment variable | Effect |
+|---|---|
+| `PICKFIX_PORT` | Listen on this port only (1024–65535) instead of the first free one of 47400–47409; see [Connect manually](#connect-manually-with-a-port) |
+| `PICKFIX_HOME` | Where the queue lives (default `~/.pickfix`) |
+| `PICKFIX_EXTENSION_IDS` | Extra extension ids allowed to connect, comma-separated |
+
 The extension's id is its Chrome Web Store item id, `eehanlcaccamfaalnfcikkdneffjkife`. `EXTENSION_PUBLIC_KEY` in `@pickfix/protocol` is that item's public key (Developer Dashboard → Package → View public key); Google holds the private key, so nothing secret lives on a developer machine.
 
 ## Release
@@ -138,6 +174,8 @@ Pickfix giúp dev frontend, QA và PM chỉ vào chỗ sai trên giao diện đa
 
    Khởi động lại Claude Code.
 3. **Mở panel Pickfix** trên trang localhost. Panel tự tìm các session đang chạy, không cần ghép nối.
+
+**Kết nối thủ công bằng port:** nếu panel không tự tìm thấy phiên (extension chỉ dò các port 47400–47409), chạy tool `pickfix_status` trong Claude Code để xem port (dòng `ws://127.0.0.1:<port>/pickfix`), rồi trong panel chọn **Kết nối thủ công**, nhập port và bấm **Kết nối**. Extension nhớ port này (tối đa 5 port gần nhất) và tự kết nối lại khi phiên khởi động lại. Muốn server chạy trên một port cố định, đặt biến môi trường `PICKFIX_PORT` (1024–65535), ví dụ `PICKFIX_PORT=51234 claude`; với file cấu hình `mcpServers` thì thêm `"env": { "PICKFIX_PORT": "51234" }`. Nếu port đó đang bị dùng, server không tự chọn port khác: `pickfix_status` sẽ báo lỗi để bạn đổi port.
 
 Muốn Claude tự sửa ngay khi nhận feedback, mở Claude bằng `claude --dangerously-load-development-channels plugin:pickfix@pickfix`. Không dùng cờ này thì gõ `/pickfix:fix` khi panel hiện **Đang chờ**. Giao diện extension có tiếng Việt và tiếng Anh, đổi trong phần cài đặt của extension.
 

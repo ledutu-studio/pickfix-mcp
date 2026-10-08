@@ -52,11 +52,14 @@ it('describes the session and the queue', async () => {
   const out = text(await call('pickfix_status'));
   expect(out).toContain('ws://127.0.0.1:47400/pickfix');
   expect(out).toContain('1 queued');
+  expect(out).toContain('choose Connect manually in the Pickfix panel and enter port 47400');
 });
 
 it('says why the extension link is down', async () => {
   deps.linkStatus = () => ({ port: null, reason: 'All ports 47400–47409 are in use by other sessions.' });
-  expect(text(await call('pickfix_status'))).toContain('All ports 47400–47409 are in use');
+  const out = text(await call('pickfix_status'));
+  expect(out).toContain('All ports 47400–47409 are in use');
+  expect(out).not.toContain('Connect manually');
 });
 
 describe('pickfix_list_batches', () => {

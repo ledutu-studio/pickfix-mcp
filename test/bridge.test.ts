@@ -67,6 +67,11 @@ describe('connection guard', () => {
     expect(res.status).toBe(404);
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
+
+  it('answers the extension\'s port probe (HEAD /), so the extension knows something listens', async () => {
+    const res = await fetch(`http://127.0.0.1:${bridge.port}/`, { method: 'HEAD' });
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('connection guard resilience', () => {

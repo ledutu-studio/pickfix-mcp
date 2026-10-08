@@ -7,6 +7,7 @@ import { startBridge, type Bridge } from './bridge.js';
 import { announce } from './channel.js';
 import { pickfixHome } from './home.js';
 import { log } from './log.js';
+import { portChoice } from './port-binder.js';
 import { SERVER_INSTRUCTIONS, registerPrompts } from './prompts.js';
 import { QueueStore } from './queue-store.js';
 import { resolveRepoRoot } from './repo.js';
@@ -58,14 +59,22 @@ export async function main(): Promise<void> {
     store.recover();
 
     try {
-      bridge = await startBridge({
-        session,
-        serverVersion: SERVER_VERSION,
-        store,
-        origins: allowedOrigins(),
-        onBatchAdded: (record) => void announce(mcp.server, record),
-      });
-      if (!bridge) linkProblem = `All ports ${PORT_FIRST}–${PORT_LAST} are in use by other sessions. Close one of them and restart this session.`;
+      const ports = portChoice();
+      bridge = await startBridge(
+        {
+          session,
+          serverVersion: SERVER_VERSION,
+          store,
+          origins: allowedOrigins(),
+          onBatchAdded: (record) => void announce(mcp.server, record),
+        },
+        ports.ports,
+      );
+      if (!bridge) {
+        linkProblem = ports.fixed
+          ? `Port ${ports.fixed} (PICKFIX_PORT) is in use. Set PICKFIX_PORT to a free port, or unset it, and restart this session.`
+          : `All ports ${PORT_FIRST}–${PORT_LAST} are in use by other sessions. Close one of them, or set PICKFIX_PORT to a free port, and restart this session.`;
+      }
     } catch (error) {
       linkProblem = `Could not start the extension link: ${(error as Error).message}`;
     }

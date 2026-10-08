@@ -40599,6 +40599,17 @@ function log(message) {
 }
 
 // src/port-binder.ts
+var MIN_FIXED_PORT = 1024;
+var MAX_FIXED_PORT = 65535;
+function portChoice(env = process.env) {
+  const raw = env.PICKFIX_PORT?.trim();
+  if (!raw) return { ports: PORTS, fixed: null };
+  const port = Number(raw);
+  if (!/^\d+$/.test(raw) || port < MIN_FIXED_PORT || port > MAX_FIXED_PORT) {
+    throw new Error(`PICKFIX_PORT must be a port number from ${MIN_FIXED_PORT} to ${MAX_FIXED_PORT}, not "${raw}".`);
+  }
+  return { ports: [port], fixed: port };
+}
 async function listenOnFirstFree(create, ports, host = "127.0.0.1") {
   for (const port of ports) {
     const server = create();
@@ -40675,9 +40686,13 @@ function toBuffer(data) {
 async function startBridge(deps, ports = PORTS) {
   const log2 = deps.log ?? log;
   const bound = await listenOnFirstFree(
-    () => createServer((_req, res) => {
-      res.writeHead(404).end();
-    }),
+    () => (
+      // Plain HTTP gets an empty 404, without CORS headers. The extension relies on any answer here: it sends
+      // `HEAD /` to see whether a port listens before it opens a WebSocket (a refused WebSocket makes Chrome slow down).
+      createServer((_req, res) => {
+        res.writeHead(404).end();
+      })
+    ),
     ports
   );
   if (!bound) return null;
@@ -41440,7 +41455,7 @@ function registerTools(server, getDeps) {
     "pickfix_status",
     {
       title: "Pickfix status",
-      description: "Show this session's Pickfix link: repository, WebSocket port (or why there is none), and how many feedback batches are in each state.",
+      description: "Show this session's Pickfix link: repository, WebSocket port (or why there is none), and how many feedback batches are in each state. The reviewer can enter the port under Connect manually in the Pickfix panel.",
       annotations: { readOnlyHint: true }
     },
     async () => {
@@ -41454,6 +41469,7 @@ function registerTools(server, getDeps) {
           `Pickfix session for ${deps.session.name} (${deps.repoRoot})`,
           `Agent: ${deps.session.agent} \xB7 session ${deps.session.sessionId}`,
           link.port ? `Extension link: listening on ws://127.0.0.1:${link.port}/pickfix` : `Extension link: not available. ${link.reason ?? ""}`.trim(),
+          ...link.port ? [`If the extension does not find this session, choose Connect manually in the Pickfix panel and enter port ${link.port}.`] : [],
           `Batches: ${countText}`
         ].join("\n")
       );
@@ -41615,14 +41631,20 @@ async function main() {
     store.prune();
     store.recover();
     try {
-      bridge = await startBridge({
-        session,
-        serverVersion: SERVER_VERSION,
-        store,
-        origins: allowedOrigins(),
-        onBatchAdded: (record2) => void announce(mcp.server, record2)
-      });
-      if (!bridge) linkProblem = `All ports ${PORT_FIRST}\u2013${PORT_LAST} are in use by other sessions. Close one of them and restart this session.`;
+      const ports = portChoice();
+      bridge = await startBridge(
+        {
+          session,
+          serverVersion: SERVER_VERSION,
+          store,
+          origins: allowedOrigins(),
+          onBatchAdded: (record2) => void announce(mcp.server, record2)
+        },
+        ports.ports
+      );
+      if (!bridge) {
+        linkProblem = ports.fixed ? `Port ${ports.fixed} (PICKFIX_PORT) is in use. Set PICKFIX_PORT to a free port, or unset it, and restart this session.` : `All ports ${PORT_FIRST}\u2013${PORT_LAST} are in use by other sessions. Close one of them, or set PICKFIX_PORT to a free port, and restart this session.`;
+      }
     } catch (error63) {
       linkProblem = `Could not start the extension link: ${error63.message}`;
     }
