@@ -62,7 +62,11 @@ export function problems(facts) {
     list.push(`Your ${BRANCH} has ${facts.ahead} commit(s) that origin/${BRANCH} does not. Push them first: the workflow releases what is on GitHub, not your machine.`);
   }
   if (facts.unreleased === 0) list.push(`Nothing to release: origin/${BRANCH} has no commits since v${facts.current}.`);
-  if (facts.ciStatus === null) list.push(`CI has not run on ${short(facts.ciSha)}, the newest commit on origin/${BRANCH} it should run on. Push again or start ci.yml, then retry.`);
+  if (facts.ciStatus === null) {
+    list.push(
+      `CI has not run on ${short(facts.ciSha)}, the newest commit on origin/${BRANCH} it should run on. GitHub skips CI when a commit message contains [skip ci] anywhere, even in the body, and for changes to docs or .md files only. Push a commit that CI runs on, then retry.`,
+    );
+  }
   else if (facts.ciStatus !== 'completed') list.push(`CI is still running on ${short(facts.ciSha)}. Wait for it: gh run watch.`);
   else if (facts.ciConclusion !== 'success') list.push(`CI ${facts.ciConclusion} on ${short(facts.ciSha)}. Fix ${BRANCH} before releasing it.`);
   if (facts.npmHasNext) list.push(`npm already has ${PACKAGE}@${facts.next}. main's version is behind npm: check that the last release commit reached main.`);
